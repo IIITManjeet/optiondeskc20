@@ -35,7 +35,8 @@ add_library(od_core
   src/svi.cpp
   src/chain.cpp
   src/surface.cpp
-  src/market_data.cpp)
+  src/market_data.cpp
+  src/risk.cpp)
 target_include_directories(od_core PUBLIC include)
 target_compile_options(od_core PUBLIC -Wall -Wextra -Wpedantic)
 if(OD_NATIVE)
@@ -43,7 +44,7 @@ if(OD_NATIVE)
 endif()
 
 # Exchange connectivity kept out of od_core so pricing/vol code has no I/O deps.
-add_library(od_deribit src/deribit.cpp)
+add_library(od_deribit src/deribit.cpp src/portfolio_io.cpp)
 target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
 # Streaming feed: Boost.Beast WebSocket over OpenSSL.
@@ -56,6 +57,9 @@ target_link_libraries(od_surface PRIVATE od_deribit)
 
 add_executable(od_live apps/od_live.cpp)
 target_link_libraries(od_live PRIVATE od_feed)
+
+add_executable(od_risk apps/od_risk.cpp)
+target_link_libraries(od_risk PRIVATE od_deribit)
 
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_feed)
@@ -74,7 +78,8 @@ if(OD_TESTS)
     tests/test_chain.cpp
     tests/test_spsc_ring.cpp
     tests/test_histogram.cpp
-    tests/test_ticker_parser.cpp)
+    tests/test_ticker_parser.cpp
+    tests/test_risk.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
