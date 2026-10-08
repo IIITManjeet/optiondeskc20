@@ -37,7 +37,10 @@ void LiveBook::apply(const TickerUpdate& u) {
     q.mark_iv = u.mark_iv;
     q.underlying = u.underlying;
     if (!seen_[u.instrument]) seen_[u.instrument] = true, ++live_;
-    last_ts_ = std::max(last_ts_, u.exch_ts_ms);
+    if (u.exch_ts_ms >= last_ts_) {
+        last_ts_ = u.exch_ts_ms;
+        if (u.index_price > 0.0) index_ = u.index_price;
+    }
 }
 
 OptionChain LiveBook::to_chain(const std::string& currency) const {
@@ -45,7 +48,9 @@ OptionChain LiveBook::to_chain(const std::string& currency) const {
     live.reserve(live_);
     for (std::size_t i = 0; i < quotes_.size(); ++i)
         if (seen_[i]) live.push_back(quotes_[i]);
-    return build_chain(currency, last_ts_, std::move(live));
+    auto chain = build_chain(currency, last_ts_, std::move(live));
+    chain.index_price = index_;
+    return chain;
 }
 
 }  // namespace od

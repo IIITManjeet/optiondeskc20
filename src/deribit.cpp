@@ -107,13 +107,19 @@ OptionChain to_chain(const Snapshot& snap) {
     };
 
     std::int64_t asof = 0;
+    double index = 0.0;
     std::vector<OptionQuote> quotes;
     quotes.reserve(snap.summary.size());
     for (const auto& s : snap.summary) {
         const auto name = s.at("instrument_name").get<std::string>();
         const auto it = meta.find(name);
         if (it == meta.end()) continue;
-        asof = std::max(asof, s.value("creation_timestamp", std::int64_t{0}));
+        const auto ts = s.value("creation_timestamp", std::int64_t{0});
+        if (ts >= asof) {
+            asof = ts;
+            // The summary's estimated_delivery_price is the spot index.
+            if (const double idx = num(s, "estimated_delivery_price"); idx > 0.0) index = idx;
+        }
 
         OptionQuote q;
         q.name = name;
@@ -128,7 +134,9 @@ OptionChain to_chain(const Snapshot& snap) {
         q.open_interest = num(s, "open_interest");
         quotes.push_back(std::move(q));
     }
-    return build_chain(snap.currency, asof, std::move(quotes));
+    auto chain = build_chain(snap.currency, asof, std::move(quotes));
+    chain.index_price = index;
+    return chain;
 }
 
 InstrumentTable fetch_instrument_table(const std::string& currency, bool testnet) {

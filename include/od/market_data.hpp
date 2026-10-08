@@ -66,6 +66,7 @@ private:
     std::vector<bool> seen_;
     std::size_t live_ = 0;
     std::int64_t last_ts_ = 0;
+    double index_ = 0.0;
 };
 
 }  // namespace od

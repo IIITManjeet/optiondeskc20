@@ -46,6 +46,7 @@ struct OptionChain {
     std::string currency;
     std::int64_t asof_ms = 0;
     std::vector<ExpirySlice> expiries;  // sorted by expiry
+    double index_price = 0.0;           // spot index (what the coin is worth in USD now)
 };
 
 constexpr double kMsPerYear = 365.0 * 24.0 * 3600.0 * 1000.0;
