@@ -25,7 +25,8 @@ add_library(od_core
   src/implied_vol.cpp
   src/svi.cpp
   src/chain.cpp
-  src/surface.cpp)
+  src/surface.cpp
+  src/market_data.cpp)
 target_include_directories(od_core PUBLIC include)
 target_compile_options(od_core PUBLIC -Wall -Wextra -Wpedantic)
 if(OD_NATIVE)

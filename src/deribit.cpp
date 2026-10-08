@@ -131,4 +131,16 @@ OptionChain to_chain(const Snapshot& snap) {
     return build_chain(snap.currency, asof, std::move(quotes));
 }
 
+InstrumentTable fetch_instrument_table(const std::string& currency, bool testnet) {
+    InstrumentTable table;
+    for (const auto& i :
+         public_get("get_instruments?currency=" + currency + "&kind=option&expired=false", testnet)) {
+        table.add({i.at("instrument_name").get<std::string>(),
+                   i.at("expiration_timestamp").get<std::int64_t>(), i.at("strike").get<double>(),
+                   i.at("option_type").get<std::string>() == "call" ? OptionType::Call
+                                                                    : OptionType::Put});
+    }
+    return table;
+}
+
 }  // namespace od::deribit

@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "od/chain.hpp"
+#include "od/market_data.hpp"
 
 namespace od::deribit {
 
@@ -27,5 +28,8 @@ Snapshot load_snapshot(const std::string& path);
 void save_snapshot(const Snapshot& snap, const std::string& path);
 
 OptionChain to_chain(const Snapshot& snap);
+
+// Active options for `currency`, as a dense-id table for the streaming feed.
+InstrumentTable fetch_instrument_table(const std::string& currency, bool testnet = false);
 
 }  // namespace od::deribit
