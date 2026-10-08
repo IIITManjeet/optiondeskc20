@@ -35,6 +35,9 @@ endif()
 add_library(od_deribit src/deribit.cpp)
 target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
+add_executable(od_surface apps/od_surface.cpp)
+target_link_libraries(od_surface PRIVATE od_deribit)
+
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_core)
 
