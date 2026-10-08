@@ -13,15 +13,27 @@ option(OD_NATIVE "Tune for the build machine (-march=native)" ON)
 option(OD_TESTS "Build tests" ON)
 
 include(FetchContent)
+FetchContent_Declare(json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(json)
+
+find_package(CURL REQUIRED)
 
 add_library(od_core
   src/implied_vol.cpp
-  src/svi.cpp)
+  src/svi.cpp
+  src/chain.cpp
+  src/surface.cpp)
 target_include_directories(od_core PUBLIC include)
 target_compile_options(od_core PUBLIC -Wall -Wextra -Wpedantic)
 if(OD_NATIVE)
   target_compile_options(od_core PUBLIC -march=native)
 endif()
+
+# Exchange connectivity kept out of od_core so pricing/vol code has no I/O deps.
+add_library(od_deribit src/deribit.cpp)
+target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_core)
@@ -35,8 +47,10 @@ if(OD_TESTS)
   add_executable(od_tests
     tests/test_black76.cpp
     tests/test_implied_vol.cpp
-    tests/test_svi.cpp)
-  target_link_libraries(od_tests PRIVATE od_core GTest::gtest_main)
+    tests/test_svi.cpp
+    tests/test_chain.cpp)
+  target_link_libraries(od_tests PRIVATE od_deribit GTest::gtest_main)
+  target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
   gtest_discover_tests(od_tests)
 endif()
