@@ -18,8 +18,17 @@ FetchContent_Declare(json
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(json)
 
+# Hot-path JSON parsing in the feed (On-Demand API: no DOM, reads only the fields used).
+set(SIMDJSON_DEVELOPER_MODE OFF CACHE INTERNAL "")
+FetchContent_Declare(simdjson
+  URL https://github.com/simdjson/simdjson/archive/refs/tags/v3.10.1.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(simdjson)
+
 find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(Boost 1.74 REQUIRED CONFIG COMPONENTS headers)
 
 add_library(od_core
   src/implied_vol.cpp
@@ -37,11 +46,17 @@ endif()
 add_library(od_deribit src/deribit.cpp)
 target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
+# Streaming feed: Boost.Beast WebSocket over OpenSSL.
+add_library(od_feed src/deribit_feed.cpp src/ticker_parser.cpp)
+target_link_libraries(od_feed PUBLIC od_deribit Boost::headers OpenSSL::SSL OpenSSL::Crypto Threads::Threads
+  PRIVATE simdjson::simdjson)
+
 add_executable(od_surface apps/od_surface.cpp)
 target_link_libraries(od_surface PRIVATE od_deribit)
 
 add_executable(od_bench bench/od_bench.cpp)
-target_link_libraries(od_bench PRIVATE od_core)
+target_link_libraries(od_bench PRIVATE od_feed)
+target_compile_definitions(od_bench PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 if(OD_TESTS)
   FetchContent_Declare(googletest
@@ -55,8 +70,9 @@ if(OD_TESTS)
     tests/test_svi.cpp
     tests/test_chain.cpp
     tests/test_spsc_ring.cpp
-    tests/test_histogram.cpp)
-  target_link_libraries(od_tests PRIVATE od_deribit Threads::Threads GTest::gtest_main)
+    tests/test_histogram.cpp
+    tests/test_ticker_parser.cpp)
+  target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
   gtest_discover_tests(od_tests)

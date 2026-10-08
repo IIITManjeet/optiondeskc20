@@ -3,10 +3,15 @@
 
 #include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "od/implied_vol.hpp"
 #include "od/svi.hpp"
+#include "od/ticker_parser.hpp"
 
 namespace {
 
@@ -58,5 +63,23 @@ int main() {
     bench("fit_svi (41 quotes)", 200, [&](int i) {
         q[i % q.size()].w *= 1.0 + 1e-9;  // perturb so each call does real work
         return od::fit_svi(q).params.a;
+    });
+
+    // Feed parse: same real 782-byte ticker frame through both parsers.
+    std::ifstream in(std::string(OD_DATA_DIR) + "/frames/ticker_BTC-27NOV26-88000-C.json");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string frame = ss.str();
+    if (frame.empty()) return 0;
+
+    bench("ticker parse: nlohmann DOM", 200'000, [&](int) {
+        const auto j = nlohmann::json::parse(frame);
+        return j["params"]["data"]["mark_price"].get<double>();
+    });
+    od::deribit::TickerParser parser;
+    od::deribit::TickerFields f;
+    bench("ticker parse: simdjson OD", 200'000, [&](int) {
+        parser.parse(frame, f);
+        return f.update.mark;
     });
 }
