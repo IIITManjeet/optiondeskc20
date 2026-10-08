@@ -54,6 +54,9 @@ target_link_libraries(od_feed PUBLIC od_deribit Boost::headers OpenSSL::SSL Open
 add_executable(od_surface apps/od_surface.cpp)
 target_link_libraries(od_surface PRIVATE od_deribit)
 
+add_executable(od_live apps/od_live.cpp)
+target_link_libraries(od_live PRIVATE od_feed)
+
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_feed)
 target_compile_definitions(od_bench PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")

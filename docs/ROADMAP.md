@@ -22,15 +22,19 @@ Deribit WS ───> │ feed handler │ ───────────> �
 Black-76 + Greeks, IV solver, SVI per expiry, arbitrage diagnostics, REST
 snapshots with offline replay, tests and benchmarks.
 
-## M2: Streaming market data
-- Boost.Beast WebSocket client (TLS) on an `epoll`-driven `io_context`, one pinned thread.
-- Subscribe to `book.{instrument}.100ms` / `ticker.{instrument}.100ms` for the chain
-  plus the perpetual/futures for the forward; handle `change_id` / `prev_change_id`
-  gaps by resubscribing for a fresh snapshot.
-- Hand updates to the pricing thread through a lock-free SPSC ring buffer
-  (cache-line padded, acquire/release atomics). Measure the hop latency.
-- Re-fit only the expiries that changed; publish surface versions.
-- Learn: TLS WebSockets, sequence-gap recovery, memory ordering, false sharing.
+## M2: Streaming market data ✅
+- Boost.Beast TLS WebSocket on a dedicated, optionally pinned feed thread;
+  `ticker.{instrument}.100ms` for every option, heartbeats, reconnect with backoff,
+  `shutdown(2)`-based interrupt for prompt Ctrl-C.
+- simdjson On-Demand parser on the hot path (nlohmann kept for rare control messages).
+- Lock-free SPSC ring (cache-line padded, cached indices, acquire/release) into the
+  pricer thread; drops counted, never blocks the feed.
+- Surface fits on a third thread fed by a latest-wins mailbox, so a 20–30 ms refit
+  never stalls the ring drain.
+- Log-linear latency histograms (parse, hop, snapshot, fit); busy-poll vs sleep-poll.
+
+Deferred: `book.*` channels with `change_id` / `prev_change_id` gap recovery (needed
+once we quote, M4); refitting only expiries that changed.
 
 ## M3: Position and risk engine
 - Positions per instrument, in coin and USD; portfolio Greeks (premium-adjusted
