@@ -8,9 +8,12 @@ Deribit's BTC/ETH options.
 - **M2, streaming market data:** TLS WebSocket feed handler, simdjson hot-path
   parsing, a lock-free SPSC ring between threads, and a live surface that refits
   on its own thread.
+- **M3, position and risk engine:** portfolio Greeks for a coin-margined book in
+  both USD and coin terms, vega by expiry, and spot × vol × time scenario P&L
+  revalued on the fitted surface.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (risk engine, market-making
-strategy, order gateway on Deribit testnet).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (market-making strategy,
+order gateway on Deribit testnet).
 
 ```
 Deribit REST ──> Snapshot ──> OptionChain ──> per-expiry IVs ──> SVI fit ──> smile metrics
@@ -98,6 +101,50 @@ The hop p99 tail is the pricer pausing for the ~170 µs book snapshot, plus WSL2
 scheduling noise. The `exch->pricer` figure the app prints includes the local clock's
 offset from Deribit, so it is not a network latency measurement.
 
+## Risk (M3)
+
+```bash
+./build/od_risk --positions examples/portfolio_btc.json --snapshot data/btc_snapshot.json
+./build/od_risk --positions my.json --currency BTC --days 7 --sticky-strike
+```
+
+Portfolio file: options in contracts (1 = 1 coin) with entry price in coin, the
+inverse perpetual in USD notional, plus the coin balance (format in
+`include/od/portfolio_io.hpp`). Options are valued with IVs from the fitted SVI
+smile for their expiry, falling back to the exchange mark IV.
+
+On a coin-margined exchange the account is held in BTC, so **USD P&L and BTC P&L
+are different questions** and a book can be flat in one while exposed in the other.
+The example (hypothetical) book is short a Nov strangle, long a Dec straddle, holds
+3 BTC and is hedged with a short perpetual. Run on the recorded snapshot:
+
+```
+equity           : 3.2299 BTC  ($262794)
+delta, USD view  : -0.0016 BTC   (USD P&L for +1% spot: $-1)
+delta, coin view : -3.2315 BTC   (BTC P&L for +1% spot: -0.03232)
+gamma, USD view  : -0.1549 BTC of delta per 1% move
+vega             : $-486 per vol point
+theta            : $+370 per day
+
+scenario P&L in USD  (sticky-moneyness, 0 days forward)
+vol \ spot       -20%       -10%        -5%        +0%        +5%       +10%       +20%
+   -5.0 pt     -27174      -4223       +110      +2054      +1256      -3731     -28029
+   +0.0 pt     -29423      -6120      -1492         +0      -1718      -7407     -31399
+   +5.0 pt     -31720      -8528      -3863      -2750      -5090     -11234     -34949
+```
+
+Delta-neutral in USD, short gamma (loses on large moves either way), short vega,
+collecting theta. The same book measured in BTC has −3.2 BTC of delta: the perp
+that flattens USD exposure is exactly what makes the coin balance shrink when
+BTC rallies.
+
+- **Portfolio delta/gamma** are bump-and-reprice on the same valuation as the grid,
+  so they can't disagree with it. Per-position Greeks are analytic Black-76.
+- **Sticky-moneyness** (default): after a spot move, each strike is priced off the
+  smile at its new moneyness. `--sticky-strike` keeps each strike's vol fixed instead.
+  With a put skew the two give materially different P&L for the same move.
+- The perpetual is marked at the index; funding and the perp/index basis are ignored.
+
 ## What's in here
 
 | File | What it does |
@@ -114,6 +161,9 @@ offset from Deribit, so it is not a network latency measurement.
 | `include/od/spsc_ring.hpp` | Lock-free single-producer/single-consumer ring buffer |
 | `include/od/histogram.hpp` | Fixed-memory log-linear latency histogram |
 | `apps/od_live.cpp` | Three-thread live surface: feed, pricer, surface worker |
+| `src/risk.cpp` | Market view, portfolio valuation, Greeks, scenario grid |
+| `src/portfolio_io.cpp` | Portfolio JSON loader |
+| `apps/od_risk.cpp` | Risk report CLI |
 
 ### Deribit conventions (verified against live data)
 

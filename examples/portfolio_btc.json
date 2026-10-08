@@ -1,0 +1,11 @@
+{
+  "currency": "BTC",
+  "coin_balance": 3.0,
+  "positions": [
+    {"instrument": "BTC-27NOV26-90000-C", "qty": -10, "entry_price": 0.0230},
+    {"instrument": "BTC-27NOV26-70000-P", "qty": -10, "entry_price": 0.0120},
+    {"instrument": "BTC-25DEC26-80000-C", "qty": 4, "entry_price": 0.0820},
+    {"instrument": "BTC-25DEC26-80000-P", "qty": 4, "entry_price": 0.0560},
+    {"instrument": "BTC-PERPETUAL", "qty": -190000, "entry_price": 81500}
+  ]
+}

@@ -36,11 +36,15 @@ snapshots with offline replay, tests and benchmarks.
 Deferred: `book.*` channels with `change_id` / `prev_change_id` gap recovery (needed
 once we quote, M4); refitting only expiries that changed.
 
-## M3: Position and risk engine
-- Positions per instrument, in coin and USD; portfolio Greeks (premium-adjusted
-  delta for inverse contracts), bucketed vega by expiry.
-- Scenario grid: PnL under spot ±x% × vol ±y pts, re-priced on the fitted surface.
-- Learn: why inverse contracts make delta hedging non-trivial; vega bucketing.
+## M3: Position and risk engine ✅
+- Options, inverse perpetual and coin balance; equity and P&L in both USD and coin.
+- Per-position analytic Greeks (incl. premium-adjusted delta); portfolio delta and
+  gamma by bump-and-reprice; vega bucketed by expiry.
+- Scenario grid over spot × vol × days forward, revalued on the SVI surface,
+  sticky-moneyness or sticky-strike.
+
+Deferred: live risk in `od_live` (lands with the strategy in M4), perp funding/basis,
+term-structure-weighted vol shocks.
 
 ## M4: Strategy (paper)
 - Quote a few liquid strikes around a theoretical value from the surface, with
