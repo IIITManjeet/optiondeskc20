@@ -15,12 +15,16 @@ option(OD_TESTS "Build tests" ON)
 include(FetchContent)
 
 add_library(od_core
-  src/implied_vol.cpp)
+  src/implied_vol.cpp
+  src/svi.cpp)
 target_include_directories(od_core PUBLIC include)
 target_compile_options(od_core PUBLIC -Wall -Wextra -Wpedantic)
 if(OD_NATIVE)
   target_compile_options(od_core PUBLIC -march=native)
 endif()
+
+add_executable(od_bench bench/od_bench.cpp)
+target_link_libraries(od_bench PRIVATE od_core)
 
 if(OD_TESTS)
   FetchContent_Declare(googletest
@@ -30,7 +34,8 @@ if(OD_TESTS)
   enable_testing()
   add_executable(od_tests
     tests/test_black76.cpp
-    tests/test_implied_vol.cpp)
+    tests/test_implied_vol.cpp
+    tests/test_svi.cpp)
   target_link_libraries(od_tests PRIVATE od_core GTest::gtest_main)
   include(GoogleTest)
   gtest_discover_tests(od_tests)
