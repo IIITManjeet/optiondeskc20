@@ -19,6 +19,7 @@ FetchContent_Declare(json
 FetchContent_MakeAvailable(json)
 
 find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(od_core
   src/implied_vol.cpp
@@ -51,8 +52,10 @@ if(OD_TESTS)
     tests/test_black76.cpp
     tests/test_implied_vol.cpp
     tests/test_svi.cpp
-    tests/test_chain.cpp)
-  target_link_libraries(od_tests PRIVATE od_deribit GTest::gtest_main)
+    tests/test_chain.cpp
+    tests/test_spsc_ring.cpp
+    tests/test_histogram.cpp)
+  target_link_libraries(od_tests PRIVATE od_deribit Threads::Threads GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
   gtest_discover_tests(od_tests)
