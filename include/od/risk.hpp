@@ -82,7 +82,7 @@ enum class IvSource { Svi, ExchangeMark, None };
 const char* to_string(IvSource s);
 
 struct PositionRisk {
-    const Position* position = nullptr;
+    const Position* position = nullptr;  // into the Portfolio given to compute_risk: keep it alive
     bool priced = false;  // false if the instrument isn't in the market view
     std::int64_t expiry_ms = 0;
     double forward = 0.0, T = 0.0;

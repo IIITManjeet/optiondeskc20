@@ -65,6 +65,9 @@ target_link_libraries(od_live PRIVATE od_feed)
 add_executable(od_feedd apps/od_feedd.cpp)
 target_link_libraries(od_feedd PRIVATE od_feed)
 
+add_executable(od_mm apps/od_mm.cpp)
+target_link_libraries(od_mm PRIVATE od_feed)
+
 add_executable(od_risk apps/od_risk.cpp)
 target_link_libraries(od_risk PRIVATE od_feed)
 

@@ -57,6 +57,9 @@ public:
     void apply(const TickerUpdate& u);
     std::size_t live_count() const { return live_; }
     std::int64_t last_exch_ts_ms() const { return last_ts_; }
+    double index() const { return index_; }
+    // Latest state of one instrument, or nullptr if it hasn't ticked yet.
+    const OptionQuote* quote(std::uint32_t id) const { return seen_[id] ? &quotes_[id] : nullptr; }
 
     // Snapshot of every instrument that has received at least one update.
     OptionChain to_chain(const std::string& currency) const;

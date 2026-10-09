@@ -1,0 +1,27 @@
+{
+  "expiries": ["30OCT26", "27NOV26"],
+  "max_moneyness": 0.08,
+  "otm_only": true,
+  "coin_balance": 2.0,
+  "requote_ms": 250,
+  "min_requote_ticks": 1,
+  "quote": {
+    "half_spread_vol": 0.015,
+    "skew_vol_per_1k_vega": 0.005,
+    "max_skew_vol": 0.05,
+    "size": 0.5,
+    "max_position": 3.0
+  },
+  "limits": {
+    "max_order_qty": 1.0,
+    "max_position": 3.0,
+    "max_abs_vega_usd": 3000,
+    "price_band_vol": 0.10,
+    "max_orders_per_sec": 50,
+    "burst": 100
+  },
+  "hedge": {
+    "threshold_coin": 0.25,
+    "hedge_collateral": false
+  }
+}
