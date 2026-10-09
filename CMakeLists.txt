@@ -36,7 +36,11 @@ add_library(od_core
   src/chain.cpp
   src/surface.cpp
   src/market_data.cpp
-  src/risk.cpp)
+  src/risk.cpp
+  src/orders.cpp
+  src/quoter.cpp
+  src/risk_gate.cpp
+  src/gateway.cpp)
 target_include_directories(od_core PUBLIC include)
 target_compile_options(od_core PUBLIC -Wall -Wextra -Wpedantic)
 if(OD_NATIVE)
@@ -83,7 +87,8 @@ if(OD_TESTS)
     tests/test_histogram.cpp
     tests/test_ticker_parser.cpp
     tests/test_risk.cpp
-    tests/test_feed_bus.cpp)
+    tests/test_feed_bus.cpp
+    tests/test_mm.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
