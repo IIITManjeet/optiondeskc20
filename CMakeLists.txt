@@ -99,7 +99,8 @@ if(OD_TESTS)
     tests/test_risk.cpp
     tests/test_feed_bus.cpp
     tests/test_mm.cpp
-    tests/test_journal.cpp)
+    tests/test_journal.cpp
+    tests/test_mm_engine.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
