@@ -44,15 +44,22 @@ std::string rpc(int id, const char* method, json params) {
 
 FeedStats snapshot(const FeedCounters& c) {
     constexpr auto r = std::memory_order_relaxed;
-    return {c.connected.load(r), c.frames.load(r),     c.bytes.load(r),
-            c.tickers.load(r),   c.ring_full.load(r),  c.unknown.load(r),
-            c.heartbeats.load(r), c.reconnects.load(r), c.subscribed.load(r)};
+    return {c.connected.load(r),  c.frames.load(r),     c.bytes.load(r),
+            c.tickers.load(r),    c.ring_full.load(r),  c.unknown.load(r),
+            c.heartbeats.load(r), c.reconnects.load(r), c.subscribed.load(r),
+            c.trades.load(r)};
 }
 
-Feed::Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters)
-    : cfg_(cfg), table_(table), sink_(std::move(sink)), counters_(counters) {
+Feed::Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters,
+           TradeSink trade_sink)
+    : cfg_(std::move(cfg)),
+      table_(table),
+      sink_(std::move(sink)),
+      trade_sink_(std::move(trade_sink)),
+      counters_(counters) {
     channels_.reserve(table.size());
     for (const auto& inst : table.all()) channels_.push_back("ticker." + inst.name + ".100ms");
+    if (!cfg_.trades_channel.empty()) channels_.push_back(cfg_.trades_channel);
 }
 
 void Feed::interrupt() {
@@ -121,6 +128,7 @@ void Feed::session(const std::atomic<bool>& stop) {
 
     TickerParser parser;
     TickerFields tick;
+    std::vector<TradeFields> trades;
     beast::flat_buffer buf;
     while (!stop.load(std::memory_order_relaxed)) {
         buf.consume(buf.size());
@@ -131,8 +139,26 @@ void Feed::session(const std::atomic<bool>& stop) {
         counters_.frames.fetch_add(1, std::memory_order_relaxed);
         counters_.bytes.fetch_add(frame.size(), std::memory_order_relaxed);
 
-        // Hot path: ~all traffic is ticker notifications.
-        if (parser.parse(frame, tick)) {
+        // Hot path: ~all traffic is ticker and trade notifications.
+        const auto kind = parser.parse(frame, tick, trades);
+        if (kind == TickerParser::Kind::Trades) {
+            const std::int64_t parsed = now_ns();
+            for (const auto& t : trades) {
+                const auto id = table_.find(t.instrument_name);
+                if (!id) {
+                    counters_.unknown.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                TradeUpdate u = t.update;
+                u.instrument = *id;
+                u.recv_ns = recv_ns;
+                u.parsed_ns = parsed;
+                counters_.trades.fetch_add(1, std::memory_order_relaxed);
+                if (trade_sink_) trade_sink_(u);
+            }
+            continue;
+        }
+        if (kind == TickerParser::Kind::Ticker) {
             const auto id = table_.find(tick.instrument_name);
             if (!id) {
                 counters_.unknown.fetch_add(1, std::memory_order_relaxed);

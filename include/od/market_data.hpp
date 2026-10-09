@@ -24,6 +24,18 @@ struct TickerUpdate {
     double mark = 0, mark_iv = 0, underlying = 0, index_price = 0;
 };
 
+// One public trade. `taker_buy` = the aggressor bought (lifted offers); otherwise
+// the aggressor sold (hit bids). Same transport rules as TickerUpdate.
+struct TradeUpdate {
+    std::uint32_t instrument = 0;
+    std::uint32_t taker_buy = 0;
+    std::int64_t exch_ts_ms = 0;
+    std::int64_t recv_ns = 0;
+    std::int64_t parsed_ns = 0;
+    std::uint64_t trade_seq = 0;
+    double price = 0, amount = 0, iv = 0, index_price = 0;
+};
+
 struct Instrument {
     std::string name;
     std::int64_t expiry_ms = 0;

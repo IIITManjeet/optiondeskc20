@@ -1,7 +1,8 @@
 // od_feedd: market-data daemon. Owns the Deribit connection and publishes every
-// ticker into a shared-memory bus that any number of local processes can read.
+// ticker and every option trade into shared-memory buses that any number of local
+// processes can read.
 //
-//   od_feedd --currency BTC                    -> /dev/shm/od_feed_BTC
+//   od_feedd --currency BTC                    -> /dev/shm/od_feed_BTC, /dev/shm/od_trades_BTC
 //   od_feedd --currency ETH --feed-cpu 2
 //   od_live --bus od_feed_BTC                  (in another terminal; run several)
 //
@@ -31,7 +32,8 @@ void on_signal(int) { g_stop.store(true); }
 
 struct Args {
     std::string currency = "BTC";
-    std::string name;  // default od_feed_<CCY>
+    std::string name;         // default od_feed_<CCY>
+    std::string trades_name;  // default od_trades_<CCY>
     int capacity_pow2 = 16;
     int feed_cpu = -1;
     int stats_s = 10;
@@ -40,7 +42,8 @@ struct Args {
 
 void usage() {
     std::puts(
-        "usage: od_feedd [--currency BTC|ETH] [--name SHM_NAME] [--capacity-pow2 N]\n"
+        "usage: od_feedd [--currency BTC|ETH] [--name SHM_NAME] [--trades-name SHM_NAME]\n"
+        "                [--capacity-pow2 N]\n"
         "                [--feed-cpu N] [--stats-s N] [--testnet]");
 }
 
@@ -54,12 +57,14 @@ bool parse(int argc, char** argv, Args& a) {
         else if (!(v = val())) return false;
         else if (f == "--currency") a.currency = v;
         else if (f == "--name") a.name = v;
+        else if (f == "--trades-name") a.trades_name = v;
         else if (f == "--capacity-pow2") a.capacity_pow2 = std::atoi(v);
         else if (f == "--feed-cpu") a.feed_cpu = std::atoi(v);
         else if (f == "--stats-s") a.stats_s = std::atoi(v);
         else return false;
     }
     if (a.name.empty()) a.name = "od_feed_" + a.currency;
+    if (a.trades_name.empty()) a.trades_name = "od_trades_" + a.currency;
     return a.capacity_pow2 >= 4 && a.capacity_pow2 <= 24 && a.stats_s > 0;
 }
 
@@ -80,17 +85,21 @@ int main(int argc, char** argv) {
         const auto table = od::deribit::fetch_instrument_table(args.currency, args.testnet);
         auto bus = od::bus::FeedBusWriter::create(args.name, args.currency, table,
                                                   std::size_t{1} << args.capacity_pow2);
-        std::fprintf(stderr, "od_feedd: %zu %s options -> /dev/shm/%s (%zu slots)\n", table.size(),
-                     args.currency.c_str(), args.name.c_str(), std::size_t{1} << args.capacity_pow2);
+        auto trade_bus = od::bus::TradeBusWriter::create(args.trades_name, args.currency, table,
+                                                         std::size_t{1} << args.capacity_pow2);
+        std::fprintf(stderr, "od_feedd: %zu %s options -> /dev/shm/%s, /dev/shm/%s (%zu slots each)\n",
+                     table.size(), args.currency.c_str(), args.name.c_str(), args.trades_name.c_str(),
+                     std::size_t{1} << args.capacity_pow2);
 
         od::deribit::FeedCounters counters;
         od::deribit::Feed feed(
-            {.testnet = args.testnet}, table,
+            {.testnet = args.testnet, .trades_channel = "trades.option." + args.currency + ".100ms"},
+            table,
             [&bus](const od::TickerUpdate& u) {
                 bus.publish(u);  // never refuses: slow readers get lapped instead
                 return true;
             },
-            counters);
+            counters, [&trade_bus](const od::TradeUpdate& t) { trade_bus.publish(t); });
 
         std::thread feed_thread([&] {
             od::name_current_thread("od-feed");
@@ -103,14 +112,18 @@ int main(int argc, char** argv) {
         std::uint64_t last_tickers = 0;
         while (!g_stop.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            bus.heartbeat(od::now_ns());
+            const auto now_ns = od::now_ns();
+            bus.heartbeat(now_ns);
+            trade_bus.heartbeat(now_ns);
             const auto stats = od::deribit::snapshot(counters);
             bus.set_stats(stats);
+            trade_bus.set_stats(stats);
             if (const auto now = std::chrono::steady_clock::now(); now >= next_stats) {
-                std::fprintf(stderr, "od_feedd: %s, %.0f tickers/s, total %llu, reconnects %llu\n",
+                std::fprintf(stderr, "od_feedd: %s, %.0f tickers/s, total %llu, trades %llu, reconnects %llu\n",
                              stats.connected ? "connected" : "DISCONNECTED",
                              static_cast<double>(stats.tickers - last_tickers) / args.stats_s,
                              static_cast<unsigned long long>(stats.tickers),
+                             static_cast<unsigned long long>(stats.trades),
                              static_cast<unsigned long long>(stats.reconnects));
                 last_tickers = stats.tickers;
                 next_stats = now + std::chrono::seconds(args.stats_s);

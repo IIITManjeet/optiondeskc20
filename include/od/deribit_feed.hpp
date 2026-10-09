@@ -27,6 +27,7 @@ struct FeedCounters {
     std::atomic<std::uint64_t> frames{0};
     std::atomic<std::uint64_t> bytes{0};
     std::atomic<std::uint64_t> tickers{0};
+    std::atomic<std::uint64_t> trades{0};
     std::atomic<std::uint64_t> ring_full{0};     // updates the sink refused (consumer behind)
     std::atomic<std::uint64_t> unknown{0};       // instruments not in the table (new listings)
     std::atomic<std::uint64_t> heartbeats{0};
@@ -39,7 +40,7 @@ struct FeedCounters {
 struct FeedStats {
     bool connected = false;
     std::uint64_t frames = 0, bytes = 0, tickers = 0, ring_full = 0, unknown = 0,
-                  heartbeats = 0, reconnects = 0, subscribed = 0;
+                  heartbeats = 0, reconnects = 0, subscribed = 0, trades = 0;
 };
 
 FeedStats snapshot(const FeedCounters& c);
@@ -48,14 +49,19 @@ struct FeedConfig {
     bool testnet = false;
     int heartbeat_s = 10;
     std::size_t subscribe_batch = 100;  // channels per public/subscribe request
+    // Also subscribe to e.g. "trades.option.BTC.100ms" (all option trades in one
+    // channel). Empty = tickers only.
+    std::string trades_channel;
 };
 
 // Returns false if the update could not be accepted (counted as ring_full).
 using TickerSink = std::function<bool(const TickerUpdate&)>;
+using TradeSink = std::function<void(const TradeUpdate&)>;
 
 class Feed {
 public:
-    Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters);
+    Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters,
+         TradeSink trade_sink = {});
 
     // Blocks until `stop` is set (and interrupt() called). Call on the feed thread.
     void run(const std::atomic<bool>& stop);
@@ -69,6 +75,7 @@ private:
     FeedConfig cfg_;
     const InstrumentTable& table_;
     TickerSink sink_;
+    TradeSink trade_sink_;
     FeedCounters& counters_;
     std::vector<std::string> channels_;
     std::atomic<int> fd_{-1};

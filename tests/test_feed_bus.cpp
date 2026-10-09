@@ -222,3 +222,30 @@ TEST(FeedBus, RejectsBadCapacity) {
     EXPECT_THROW(od::bus::FeedBusWriter::create(unique_name(), "BTC", small_table(), 12),
                  std::invalid_argument);
 }
+
+TEST(FeedBus, TradeTopicIsTypedAndSeparate) {
+    const auto tickers = unique_name();
+    const auto trades = unique_name();
+    auto tw = od::bus::FeedBusWriter::create(tickers, "BTC", small_table(), 64);
+    auto xw = od::bus::TradeBusWriter::create(trades, "BTC", small_table(), 64);
+
+    // A reader of the wrong message type is refused.
+    EXPECT_THROW(od::bus::TradeBusReader::open(tickers), std::runtime_error);
+    EXPECT_THROW(od::bus::FeedBusReader::open(trades), std::runtime_error);
+
+    auto xr = od::bus::TradeBusReader::open(trades);
+    od::TradeUpdate t;
+    t.instrument = 2;
+    t.taker_buy = 1;
+    t.trade_seq = 607;
+    t.price = 0.0008;
+    t.amount = 0.1;
+    xw.publish(t);
+    od::TradeUpdate got;
+    ASSERT_EQ(xr.poll(got), od::bus::TradeBusReader::Poll::Update);
+    EXPECT_EQ(got.instrument, 2u);
+    EXPECT_EQ(got.taker_buy, 1u);
+    EXPECT_EQ(got.trade_seq, 607u);
+    EXPECT_DOUBLE_EQ(got.price, 0.0008);
+    EXPECT_DOUBLE_EQ(got.amount, 0.1);
+}

@@ -80,3 +80,39 @@ TEST(TickerParser, ReusableAcrossMessages) {
     ASSERT_TRUE(parser.parse(frame, f));
     EXPECT_EQ(f.instrument_name, "BTC-27NOV26-88000-C");
 }
+
+// Real frame from trades.option.BTC.100ms (2026-10-10).
+TEST(TickerParser, ParsesTradeBatch) {
+    const std::string frame = read_frame("trades_option_BTC.json");
+    ASSERT_FALSE(frame.empty());
+    od::deribit::TickerParser parser;
+    od::deribit::TickerFields tick;
+    std::vector<od::deribit::TradeFields> trades;
+    ASSERT_EQ(parser.parse(frame, tick, trades), od::deribit::TickerParser::Kind::Trades);
+
+    const auto data = nlohmann::json::parse(frame)["params"]["data"];
+    ASSERT_EQ(trades.size(), data.size());
+    for (std::size_t i = 0; i < trades.size(); ++i) {
+        const auto& d = data[i];
+        const auto& t = trades[i];
+        EXPECT_EQ(t.instrument_name, d["instrument_name"].get<std::string>());
+        EXPECT_DOUBLE_EQ(t.update.price, d["price"].get<double>());
+        EXPECT_DOUBLE_EQ(t.update.amount, d["amount"].get<double>());
+        EXPECT_DOUBLE_EQ(t.update.iv, d["iv"].get<double>() / 100.0);
+        EXPECT_EQ(t.update.taker_buy, d["direction"] == "buy" ? 1u : 0u);
+        EXPECT_EQ(t.update.trade_seq, d["trade_seq"].get<std::uint64_t>());
+        EXPECT_EQ(t.update.exch_ts_ms, d["timestamp"].get<std::int64_t>());
+    }
+    // The ticker-only overload must not mistake it for a ticker.
+    EXPECT_FALSE(parser.parse(frame, tick));
+}
+
+TEST(TickerParser, ClassifiesTickerFrames) {
+    od::deribit::TickerParser parser;
+    od::deribit::TickerFields tick;
+    std::vector<od::deribit::TradeFields> trades;
+    EXPECT_EQ(parser.parse(read_frame("ticker_BTC-27NOV26-88000-C.json"), tick, trades),
+              od::deribit::TickerParser::Kind::Ticker);
+    EXPECT_EQ(parser.parse(read_frame("subscribe_ack.json"), tick, trades),
+              od::deribit::TickerParser::Kind::Other);
+}

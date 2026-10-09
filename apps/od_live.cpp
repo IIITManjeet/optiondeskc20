@@ -267,7 +267,7 @@ public:
         : currency_(args.currency),
           table_(od::deribit::fetch_instrument_table(args.currency, args.testnet)),
           ring_(std::size_t{1} << args.ring_pow2),
-          feed_({.testnet = args.testnet}, table_,
+          feed_({.testnet = args.testnet, .trades_channel = {}}, table_,
                 [this](const od::TickerUpdate& u) { return ring_.try_push(u); }, counters_),
           thread_([this, cpu = args.feed_cpu] {
               od::name_current_thread("od-feed");
