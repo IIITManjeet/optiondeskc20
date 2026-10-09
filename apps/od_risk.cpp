@@ -3,6 +3,7 @@
 //   od_risk --positions examples/portfolio_btc.json --snapshot data/btc_snapshot.json
 //   od_risk --positions my.json --currency BTC              live REST snapshot
 //   od_risk --positions my.json --days 7 --sticky-strike     a week of decay, sticky-strike vols
+//   od_risk --positions my.json --bus od_feed_BTC            from od_feedd's shared memory
 
 #include <cmath>
 #include <cstdio>
@@ -14,13 +15,14 @@
 #include <vector>
 
 #include "od/deribit.hpp"
+#include "od/feed_bus.hpp"
 #include "od/portfolio_io.hpp"
 #include "od/risk.hpp"
 
 namespace {
 
 struct Args {
-    std::string positions, snapshot, currency;
+    std::string positions, snapshot, currency, bus;
     std::vector<double> spot{-0.20, -0.10, -0.05, 0.0, 0.05, 0.10, 0.20};
     std::vector<double> vol{-10, -5, 0, 5, 10};
     double days = 0.0;
@@ -37,7 +39,7 @@ std::vector<double> parse_list(const char* s, double scale) {
 
 void usage() {
     std::puts(
-        "usage: od_risk --positions FILE [--snapshot FILE | --currency BTC|ETH]\n"
+        "usage: od_risk --positions FILE [--snapshot FILE | --currency BTC|ETH | --bus NAME]\n"
         "               [--spot -20,-10,0,10,20] [--vol -10,0,10] [--days N]\n"
         "               [--sticky-strike] [--testnet]\n"
         "  --spot in percent, --vol in vol points");
@@ -55,6 +57,7 @@ bool parse(int argc, char** argv, Args& a) {
         else if (f == "--positions") a.positions = v;
         else if (f == "--snapshot") a.snapshot = v;
         else if (f == "--currency") a.currency = v;
+        else if (f == "--bus") a.bus = v;
         else if (f == "--spot") a.spot = parse_list(v, 0.01);
         else if (f == "--vol") a.vol = parse_list(v, 1.0);
         else if (f == "--days") a.days = std::atof(v);
@@ -93,9 +96,19 @@ int main(int argc, char** argv) {
     try {
         const auto pf = od::load_portfolio(args.positions);
         const std::string ccy = args.currency.empty() ? pf.currency : args.currency;
-        const auto snap = args.snapshot.empty() ? od::deribit::fetch_snapshot(ccy, args.testnet)
-                                                : od::deribit::load_snapshot(args.snapshot);
-        const auto chain = od::deribit::to_chain(snap);
+        od::OptionChain chain;
+        if (!args.bus.empty()) {
+            // Latest state of every instrument straight from the bus's last-value cache.
+            auto reader = od::bus::FeedBusReader::open(args.bus);
+            const auto table = reader.instruments();
+            od::LiveBook book(table);
+            for (const auto& u : reader.snapshot()) book.apply(u);
+            chain = book.to_chain(reader.currency());
+        } else {
+            const auto snap = args.snapshot.empty() ? od::deribit::fetch_snapshot(ccy, args.testnet)
+                                                    : od::deribit::load_snapshot(args.snapshot);
+            chain = od::deribit::to_chain(snap);
+        }
         const auto fits = od::build_surface(chain);
         const auto mkt = od::MarketView::build(chain, fits);
         const auto r = od::compute_risk(pf, mkt);

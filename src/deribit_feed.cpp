@@ -42,9 +42,15 @@ std::string rpc(int id, const char* method, json params) {
 
 }  // namespace
 
-Feed::Feed(FeedConfig cfg, const InstrumentTable& table, SpscRing<TickerUpdate>& ring,
-           FeedCounters& counters)
-    : cfg_(cfg), table_(table), ring_(ring), counters_(counters) {
+FeedStats snapshot(const FeedCounters& c) {
+    constexpr auto r = std::memory_order_relaxed;
+    return {c.connected.load(r), c.frames.load(r),     c.bytes.load(r),
+            c.tickers.load(r),   c.ring_full.load(r),  c.unknown.load(r),
+            c.heartbeats.load(r), c.reconnects.load(r), c.subscribed.load(r)};
+}
+
+Feed::Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters)
+    : cfg_(cfg), table_(table), sink_(std::move(sink)), counters_(counters) {
     channels_.reserve(table.size());
     for (const auto& inst : table.all()) channels_.push_back("ticker." + inst.name + ".100ms");
 }
@@ -137,9 +143,9 @@ void Feed::session(const std::atomic<bool>& stop) {
             u.recv_ns = recv_ns;
             u.parsed_ns = now_ns();
             counters_.tickers.fetch_add(1, std::memory_order_relaxed);
-            // Never block the feed thread: if the pricer is behind, drop and count.
+            // Never block the feed thread: if the consumer is behind, drop and count.
             // Tickers are full-state snapshots, so the next one supersedes a dropped one.
-            if (!ring_.try_push(u)) counters_.ring_full.fetch_add(1, std::memory_order_relaxed);
+            if (!sink_(u)) counters_.ring_full.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
 

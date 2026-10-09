@@ -3,7 +3,8 @@
 //
 // Runs on its own thread: TLS WebSocket to Deribit, subscribes to
 // `ticker.{instrument}.100ms` for every option in the table, parses each
-// notification into a TickerUpdate and pushes it into an SPSC ring for the pricer.
+// notification into a TickerUpdate and hands it to a sink: the in-process SPSC
+// ring (od_live) or the shared-memory bus (od_feedd).
 //
 // Uses synchronous Boost.Beast: one connection, one thread, a blocking read loop.
 // That's the simplest correct design for a single feed; an async io_context only
@@ -13,11 +14,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "od/market_data.hpp"
-#include "od/spsc_ring.hpp"
 
 namespace od::deribit {
 
@@ -26,7 +27,7 @@ struct FeedCounters {
     std::atomic<std::uint64_t> frames{0};
     std::atomic<std::uint64_t> bytes{0};
     std::atomic<std::uint64_t> tickers{0};
-    std::atomic<std::uint64_t> ring_full{0};     // updates dropped because the pricer fell behind
+    std::atomic<std::uint64_t> ring_full{0};     // updates the sink refused (consumer behind)
     std::atomic<std::uint64_t> unknown{0};       // instruments not in the table (new listings)
     std::atomic<std::uint64_t> heartbeats{0};
     std::atomic<std::uint64_t> reconnects{0};
@@ -34,16 +35,27 @@ struct FeedCounters {
     std::atomic<bool> connected{false};
 };
 
+// Plain-value copy of the counters, e.g. for display or for the shared-memory bus.
+struct FeedStats {
+    bool connected = false;
+    std::uint64_t frames = 0, bytes = 0, tickers = 0, ring_full = 0, unknown = 0,
+                  heartbeats = 0, reconnects = 0, subscribed = 0;
+};
+
+FeedStats snapshot(const FeedCounters& c);
+
 struct FeedConfig {
     bool testnet = false;
     int heartbeat_s = 10;
     std::size_t subscribe_batch = 100;  // channels per public/subscribe request
 };
 
+// Returns false if the update could not be accepted (counted as ring_full).
+using TickerSink = std::function<bool(const TickerUpdate&)>;
+
 class Feed {
 public:
-    Feed(FeedConfig cfg, const InstrumentTable& table, SpscRing<TickerUpdate>& ring,
-         FeedCounters& counters);
+    Feed(FeedConfig cfg, const InstrumentTable& table, TickerSink sink, FeedCounters& counters);
 
     // Blocks until `stop` is set (and interrupt() called). Call on the feed thread.
     void run(const std::atomic<bool>& stop);
@@ -56,7 +68,7 @@ private:
 
     FeedConfig cfg_;
     const InstrumentTable& table_;
-    SpscRing<TickerUpdate>& ring_;
+    TickerSink sink_;
     FeedCounters& counters_;
     std::vector<std::string> channels_;
     std::atomic<int> fd_{-1};
