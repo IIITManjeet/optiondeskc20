@@ -52,7 +52,7 @@ add_library(od_deribit src/deribit.cpp src/portfolio_io.cpp)
 target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
 # Streaming feed: Boost.Beast WebSocket over OpenSSL.
-add_library(od_feed src/deribit_feed.cpp src/ticker_parser.cpp src/feed_bus.cpp)
+add_library(od_feed src/deribit_feed.cpp src/ticker_parser.cpp src/feed_bus.cpp src/journal.cpp)
 target_link_libraries(od_feed PUBLIC od_deribit Boost::headers OpenSSL::SSL OpenSSL::Crypto Threads::Threads
   PRIVATE simdjson::simdjson)
 
@@ -67,6 +67,10 @@ target_link_libraries(od_feedd PRIVATE od_feed)
 
 add_executable(od_mm apps/od_mm.cpp)
 target_link_libraries(od_mm PRIVATE od_feed)
+
+add_executable(od_record apps/od_record.cpp)
+target_link_libraries(od_record PRIVATE od_feed)
+
 
 add_executable(od_risk apps/od_risk.cpp)
 target_link_libraries(od_risk PRIVATE od_feed)
@@ -91,7 +95,8 @@ if(OD_TESTS)
     tests/test_ticker_parser.cpp
     tests/test_risk.cpp
     tests/test_feed_bus.cpp
-    tests/test_mm.cpp)
+    tests/test_mm.cpp
+    tests/test_journal.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
