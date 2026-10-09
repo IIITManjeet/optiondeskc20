@@ -49,10 +49,19 @@ once we quote, M4); refitting only expiries that changed.
 Deferred: live risk in `od_live` (lands with the strategy in M4), perp funding/basis,
 term-structure-weighted vol shocks.
 
-## M4: Strategy (paper)
-- Quote a few liquid strikes around a theoretical value from the surface, with
-  skew to inventory (Avellaneda–Stoikov-style), and delta-hedge with the perpetual.
-- Learn: edge vs adverse selection, gamma/theta trade-off, hedging frequency.
+## M4: Strategy (paper) — in progress
+Done:
+- Vol-space quoting around the SVI theo at the live forward, inventory skew by
+  portfolio vega, Deribit tick ladder, post-only, per-side position limits.
+- Pre-trade risk gate (size, worst-case position, vega, fat-finger band, rate limit,
+  kill switch), order manager and ledger, perpetual delta hedger.
+- `od_mm` on the feed bus with a simulated exchange and a quote diagnostics table.
+
+Next:
+- Fill model from trade prints (`trades.option.{ccy}.100ms` on the bus) with a
+  queue-position estimate from the displayed size at our price; the current
+  top-of-book model can't see fills at the touch.
+- Mark-outs: P&L of each fill N seconds later, to measure adverse selection.
 
 ## M5: Order gateway + pre-trade risk
 - Authenticated JSON-RPC over WebSocket to **test.deribit.com** (testnet API keys

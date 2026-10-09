@@ -12,8 +12,11 @@ Deribit's BTC/ETH options.
 - **M3, position and risk engine:** portfolio Greeks for a coin-margined book in
   both USD and coin terms, vega by expiry, and spot × vol × time scenario P&L
   revalued on the fitted surface.
+- **M4 (in progress), market maker:** vol-space quoting with inventory skew,
+  pre-trade risk gate, order manager and ledger, delta hedger, paper trading on a
+  simulated exchange driven by live data.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (market-making strategy,
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (trade-print fill model,
 order gateway on Deribit testnet).
 
 ```
@@ -192,6 +195,54 @@ BTC rallies.
   With a put skew the two give materially different P&L for the same move.
 - The perpetual is marked at the index; funding and the perp/index basis are ignored.
 
+## Market maker (M4, paper)
+
+```bash
+./build/od_feedd --currency BTC                                              # terminal 1
+./build/od_mm --bus od_feed_BTC --config examples/mm_btc.json --show-quotes  # terminal 2
+```
+
+`od_mm` is one more reader on the feed bus. On its strategy thread:
+
+1. **Theo** for each quoted option: the latest SVI smile (refit every second on a
+   separate thread) evaluated at the option's *current* forward, so theo tracks the
+   underlying between refits.
+2. **Quote in vol space:** theo vol ± half-spread, shifted against inventory by
+   portfolio vega (long vega → both quotes lower: sell more eagerly, buy less).
+   Convert to coin prices, round outward to Deribit's tick ladder, stay post-only,
+   drop a side at the position limit.
+3. **Pre-trade risk gate** on every new order and amend: max order size, worst-case
+   position including resting orders, portfolio vega limit, fat-finger band in vol
+   terms, order-rate token bucket, kill switch (`kill -USR1`). Orders that reduce
+   the limited risk always pass, so the gate can't trap the book.
+4. **Order manager** builds positions only from execution reports: premium cash,
+   fees, inverse-perp harmonic entry and realised P&L.
+5. **Delta hedge** with the perpetual each second when USD delta leaves ±0.25 BTC,
+   valued on the M3 risk engine. By default the coin balance's own delta is left
+   alone (`hedge_collateral`).
+
+The exchange is simulated (`SimGateway`); the strategy only sees the `Gateway`
+interface, so the Deribit testnet gateway can replace it.
+
+**What paper trading showed.** `--show-quotes` puts our quotes next to the market's,
+in price and in vol (live BTC data, quoting ±0.4 vol around theo):
+
+```
+  instrument              mkt_bid  mkt_ask |  our_bid  our_ask |    theo |  mb_iv  ob_iv  oa_iv  ma_iv
+  BTC-30OCT26-81000-P      0.0210   0.0220 |   0.0210   0.0220 |  0.0214 |  32.20  32.20  33.31  33.31
+  BTC-27NOV26-80000-P      0.0360   0.0365 |   0.0355   0.0370 |  0.0361 |  36.63  36.27  37.36  37.00
+  BTC-27NOV26-88000-C      0.0290   0.0295 |   0.0285   0.0300 |  0.0293 |  35.84  35.47  36.58  36.21
+```
+
+The listed market is one or two ticks wide, and one tick (0.0005 BTC) is worth
+0.35–0.6 vol points here. Theo sits inside the spread, but after rounding to the
+tick our quotes can only *join* the best bid/offer or sit a tick behind: there is
+no price inside the spread to improve to. Fills then depend on queue position at
+the touch, which top-of-book data can't show. Five minutes of paper trading
+produced no fills, because the simulator only fills when the opposite best price
+moves onto ours, so it misses trades that hit our level directly. The next step
+is a fill model driven by trade prints with a queue estimate.
+
 ## What's in here
 
 | File | What it does |
@@ -213,6 +264,11 @@ BTC rallies.
 | `apps/od_risk.cpp` | Risk report CLI |
 | `src/feed_bus.cpp` | Shared-memory broadcast ring + last-value cache (writer and reader) |
 | `apps/od_feedd.cpp` | Feed daemon publishing to the shared-memory bus |
+| `src/quoter.cpp` | Vol-space quoting, inventory skew, Deribit tick ladder |
+| `src/risk_gate.cpp` | Pre-trade checks, token bucket, kill switch |
+| `src/orders.cpp` | Order state, positions, cash, fees, inverse-perp ledger |
+| `src/gateway.cpp` | Gateway interface, simulated exchange, hedge sizing |
+| `apps/od_mm.cpp` | Paper market maker on the feed bus |
 
 ### Deribit conventions (verified against live data)
 
