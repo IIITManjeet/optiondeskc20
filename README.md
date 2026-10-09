@@ -7,7 +7,8 @@ Deribit's BTC/ETH options.
   solver, an SVI volatility surface fitted to the chain, static-arbitrage diagnostics.
 - **M2, streaming market data:** TLS WebSocket feed handler, simdjson hot-path
   parsing, a lock-free SPSC ring between threads, and a live surface that refits
-  on its own thread.
+  on its own thread. A **shared-memory feed bus** lets one feed daemon serve
+  any number of local processes.
 - **M3, position and risk engine:** portfolio Greeks for a coin-margined book in
   both USD and coin terms, vega by expiry, and spot × vol × time scenario P&L
   revalued on the fitted surface.
@@ -101,6 +102,52 @@ The hop p99 tail is the pricer pausing for the ~170 µs book snapshot, plus WSL2
 scheduling noise. The `exch->pricer` figure the app prints includes the local clock's
 offset from Deribit, so it is not a network latency measurement.
 
+### Shared-memory feed bus
+
+One process owns the exchange connection; everything else reads market data from
+shared memory, so adding a consumer costs no extra connection, parsing or REST calls.
+
+```
+od_feedd ──publish──> /dev/shm/od_feed_BTC <──read── od_live
+(Deribit WS,          ┌ header: geometry, write_seq, heartbeat, feed stats   <──read── od_live
+ simdjson)            ├ instrument table                                     <──read── od_risk --bus
+                      ├ last-value cache (latest update per instrument)
+                      └ broadcast ring (65,536 slots)
+```
+
+```bash
+./build/od_feedd --currency BTC --feed-cpu 2                      # terminal 1
+./build/od_live --bus od_feed_BTC --busy-poll --pricer-cpu 6      # terminal 2 (and 3, ...)
+./build/od_risk --positions examples/portfolio_btc.json --bus od_feed_BTC
+```
+
+- **Single writer, many readers, writer never waits.** Each reader keeps its own
+  position. A reader more than a ring's length behind is *lapped* and resyncs from
+  the last-value cache; since tickers carry full state, it only skips intermediate
+  states, never the latest one. New readers start from that cache too, so they have
+  the whole chain immediately.
+- **Every slot is a seqlock.** The writer marks the slot busy, writes, then publishes
+  the slot's sequence number; a reader copies between two reads of it and discards
+  the copy if it changed. Payload words are relaxed `std::atomic<uint64_t>`, so this
+  is well-defined C++ (a plain `memcpy` would be a data race).
+- **Readers map the segment read-only and pre-faulted** (`MAP_POPULATE`), so a
+  buggy reader can't corrupt the feed and the hot path never page-faults.
+- **Liveness:** the daemon writes a heartbeat every 100 ms. Readers flag a stale
+  producer after 2 s and reattach when a new one starts (detected by its epoch).
+
+Measured with `od_feedd` and two `od_live --bus` processes attached for 40 s:
+both received the same 39,346 updates, 0 laps, 0 drops. Cross-process hop
+(parsed in `od_feedd` → read by another process) was **0.5 µs p50** with
+busy-polling, against 0.4 µs for the in-process ring measured back-to-back.
+The bus costs about the same as a thread-to-thread handoff. Tails (p90 tens of
+µs, p99 up to ~1 ms in these runs) varied run to run on WSL2 and showed up equally
+in the in-process ring, so they come from the environment, not the bus. Pre-faulting
+the reader's mapping cut the bus p99 from 4.2 ms to 0.79 ms.
+
+Tests cover ordering, independent readers, lapping and resync, a two-thread stress
+test (1M writes into an 8-slot ring: no torn reads accepted, no reordering), and a
+real two-process test using `fork()`.
+
 ## Risk (M3)
 
 ```bash
@@ -164,6 +211,8 @@ BTC rallies.
 | `src/risk.cpp` | Market view, portfolio valuation, Greeks, scenario grid |
 | `src/portfolio_io.cpp` | Portfolio JSON loader |
 | `apps/od_risk.cpp` | Risk report CLI |
+| `src/feed_bus.cpp` | Shared-memory broadcast ring + last-value cache (writer and reader) |
+| `apps/od_feedd.cpp` | Feed daemon publishing to the shared-memory bus |
 
 ### Deribit conventions (verified against live data)
 

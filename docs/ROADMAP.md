@@ -32,6 +32,9 @@ snapshots with offline replay, tests and benchmarks.
 - Surface fits on a third thread fed by a latest-wins mailbox, so a 20–30 ms refit
   never stalls the ring drain.
 - Log-linear latency histograms (parse, hop, snapshot, fit); busy-poll vs sleep-poll.
+- Shared-memory feed bus: `od_feedd` publishes into `/dev/shm`; any number of
+  reader processes (`od_live --bus`, `od_risk --bus`) attach. Seqlock broadcast ring,
+  last-value cache for attach/lap resync, producer heartbeat and reattach.
 
 Deferred: `book.*` channels with `change_id` / `prev_change_id` gap recovery (needed
 once we quote, M4); refitting only expiries that changed.
