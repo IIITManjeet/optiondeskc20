@@ -26,15 +26,24 @@ public:
     virtual void poll(std::vector<ExecEvent>& out) = 0;
 };
 
-// Paper exchange driven by real top-of-book data.
+// Paper exchange driven by real top-of-book data and real trade prints.
 //
-// Fill model (deliberately pessimistic): a resting buy fills only when the best
-// ask trades down *to or through* its price, a resting sell when the best bid
-// rises to it. With top-of-book data alone there's no way to know when someone
-// simply hits our quote, so every fill here is one where the market moved
-// against us first: it shows adverse selection, not spread capture. Fills are
-// full size at our price with maker fees. Perpetual orders (the hedge) fill
-// immediately at the price given, with taker fees.
+// Fill model, with a queue-position estimate per resting order:
+//   - Joining the best price puts us behind everything displayed there
+//     (queue_ahead = displayed size). Improving the best price puts us first
+//     (queue_ahead = 0). Resting behind the best price, our place is unknown
+//     until our price becomes the best again; then we assume we're last.
+//   - Displayed size at our level shrinking moves us up (cancellations ahead of
+//     us). Assuming cancels come from ahead is optimistic; it's the usual
+//     simplification.
+//   - A trade at our price consumes queue_ahead first, then fills us, possibly
+//     partially. A trade *through* our price fills us fully. So does the opposite
+//     best price moving onto ours.
+//   - An amend that changes price loses priority, as on the exchange.
+// Our orders aren't in the real book, so the liquidity we "take" from a trade is
+// not taken from anyone else: fills are an estimate, not a replay. Fills are at
+// our price with maker fees. Perpetual orders (the hedge) fill immediately at
+// the price given, with taker fees.
 class SimGateway : public Gateway {
 public:
     void place(const OrderRequest& req) override;
@@ -43,18 +52,30 @@ public:
     void cancel_all() override;
     void poll(std::vector<ExecEvent>& out) override;
 
-    // Feed the simulator the latest top of book for an instrument.
-    void on_market(const std::string& instrument, double best_bid, double best_ask);
+    // Latest top of book for an instrument (sizes in contracts).
+    void on_market(const std::string& instrument, double best_bid, double best_ask,
+                   double bid_amount = 0.0, double ask_amount = 0.0);
+    // A public trade. taker_buy = the aggressor bought (so resting sells trade).
+    void on_trade(const std::string& instrument, double price, double amount, bool taker_buy);
 
     std::size_t resting() const { return resting_.size(); }
+    // Estimated contracts ahead of an order at its price; infinity = behind the best price.
+    double queue_ahead(std::uint64_t client_id) const;
 
 private:
     struct Book {
-        double bid = 0.0, ask = 0.0;
+        double bid = 0.0, ask = 0.0, bid_amount = 0.0, ask_amount = 0.0;
+    };
+    struct Resting {
+        OrderRequest req;
+        double remaining = 0.0;
+        double queue = 0.0;
     };
     bool crosses(const OrderRequest& r) const;
+    double initial_queue(const OrderRequest& r) const;
+    void fill(Resting& r, double qty);
 
-    std::unordered_map<std::uint64_t, OrderRequest> resting_;
+    std::unordered_map<std::uint64_t, Resting> resting_;
     std::unordered_map<std::string, Book> books_;
     std::deque<ExecEvent> events_;
 };

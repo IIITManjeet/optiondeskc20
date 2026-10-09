@@ -287,3 +287,101 @@ TEST(Hedge, ThresholdAndContractRounding) {
     EXPECT_EQ(od::hedge_notional_usd(0.30004, 80000, p), -24000.0);  // 24003.2 -> 24000
     EXPECT_EQ(od::hedge_notional_usd(-1.0, 81234, p), 81230.0);
 }
+
+// --- Queue-position fill model ------------------------------------------------------
+
+namespace {
+std::vector<od::ExecEvent> drain(od::SimGateway& gw) {
+    std::vector<od::ExecEvent> ev;
+    gw.poll(ev);
+    return ev;
+}
+double filled(const std::vector<od::ExecEvent>& ev) {
+    double q = 0;
+    for (const auto& e : ev)
+        if (e.kind == od::ExecEvent::Kind::Fill) q += e.qty;
+    return q;
+}
+}  // namespace
+
+TEST(SimQueue, JoiningTheBidQueuesBehindDisplayedSize) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0210, 5.0, 3.0);
+    gw.place({1, "C", od::Side::Buy, 0.0200, 1.0, true});
+    drain(gw);
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 5.0);
+
+    gw.on_trade("C", 0.0200, 3.0, /*taker_buy=*/false);  // sellers hit the bid
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.0);
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 2.0);
+
+    gw.on_trade("C", 0.0200, 2.5, false);  // 2 ahead of us, 0.5 reaches us
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.5);
+    EXPECT_EQ(gw.resting(), 1u);  // partially filled, still working
+
+    gw.on_trade("C", 0.0200, 10.0, false);
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.5);
+    EXPECT_EQ(gw.resting(), 0u);
+}
+
+TEST(SimQueue, ImprovingThePriceIsFirstInQueue) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0215, 5.0, 3.0);
+    gw.place({1, "C", od::Side::Buy, 0.0205, 1.0, true});
+    drain(gw);
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 0.0);
+    gw.on_trade("C", 0.0205, 0.3, false);
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.3);
+}
+
+TEST(SimQueue, TradesOnTheOtherSideDontFillUs) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0210, 0.0, 0.0);
+    gw.place({1, "C", od::Side::Buy, 0.0200, 1.0, true});
+    drain(gw);
+    gw.on_trade("C", 0.0210, 5.0, /*taker_buy=*/true);  // buyers lifting offers
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.0);
+}
+
+TEST(SimQueue, TradeThroughOurPriceFillsFully) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0210, 50.0, 3.0);
+    gw.place({1, "C", od::Side::Sell, 0.0210, 1.0, true});
+    drain(gw);
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 3.0);
+    gw.on_trade("C", 0.0215, 0.1, /*taker_buy=*/true);  // printed above our offer
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 1.0);
+}
+
+TEST(SimQueue, CancellationsAheadMoveUsUp) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0210, 5.0, 3.0);
+    gw.place({1, "C", od::Side::Buy, 0.0200, 1.0, true});
+    drain(gw);
+    gw.on_market("C", 0.0200, 0.0210, 2.0, 3.0);  // displayed bid size dropped to 2
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 2.0);
+    gw.on_market("C", 0.0200, 0.0210, 4.0, 3.0);  // size added later queues behind us
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 2.0);
+}
+
+TEST(SimQueue, BehindTheBestThenBestAgainAssumesLast) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0210, 5.0, 3.0);
+    gw.place({1, "C", od::Side::Buy, 0.0195, 1.0, true});
+    drain(gw);
+    EXPECT_TRUE(std::isinf(gw.queue_ahead(1)));
+    gw.on_trade("C", 0.0195, 100.0, false);  // place unknown: can't claim a fill...
+    EXPECT_DOUBLE_EQ(filled(drain(gw)), 0.0);
+    gw.on_market("C", 0.0195, 0.0205, 7.0, 3.0);  // ...until our level is the best
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 7.0);
+}
+
+TEST(SimQueue, RepricingLosesPriority) {
+    od::SimGateway gw;
+    gw.on_market("C", 0.0200, 0.0215, 5.0, 3.0);
+    gw.place({1, "C", od::Side::Buy, 0.0205, 1.0, true});  // first in queue
+    drain(gw);
+    gw.amend(1, 0.0200, 1.0);  // move down to join the bid: back of the queue
+    drain(gw);
+    EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 5.0);
+}

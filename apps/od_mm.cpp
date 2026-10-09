@@ -17,6 +17,7 @@
 #include <signal.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -100,6 +101,7 @@ Config load_config(const std::string& path) {
 
 struct Args {
     std::string bus = "od_feed_BTC";
+    std::string trades_bus;  // default od_trades_<CCY>
     std::string config = "examples/mm_btc.json";
     int duration_s = 0;
     int status_ms = 5000;
@@ -116,6 +118,7 @@ bool parse(int argc, char** argv, Args& a) {
         const char* v = i + 1 < argc ? argv[++i] : nullptr;
         if (!v) return false;
         if (f == "--bus") a.bus = v;
+        else if (f == "--trades-bus") a.trades_bus = v;
         else if (f == "--config") a.config = v;
         else if (f == "--duration") a.duration_s = std::atoi(v);
         else if (f == "--status-ms") a.status_ms = std::atoi(v);
@@ -187,7 +190,9 @@ struct Quoted {
 int main(int argc, char** argv) {
     Args args;
     if (!parse(argc, argv, args)) {
-        std::puts("usage: od_mm [--bus SHM_NAME] [--config FILE] [--duration S] [--status-ms N]");
+        std::puts(
+            "usage: od_mm [--bus SHM_NAME] [--trades-bus SHM_NAME] [--config FILE] [--duration S]\n"
+            "             [--status-ms N] [--show-quotes]");
         return 2;
     }
     struct sigaction sa {};
@@ -207,6 +212,16 @@ int main(int argc, char** argv) {
     }
     const auto table = reader->instruments();
     const auto ccy = reader->currency();
+
+    // Trade prints drive the queue model; without them only book moves can fill us.
+    std::optional<od::bus::TradeBusReader> trades;
+    try {
+        trades.emplace(od::bus::TradeBusReader::open(args.trades_bus.empty() ? "od_trades_" + ccy
+                                                                             : args.trades_bus));
+        trades->seek_to_end();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "warning: no trade feed (%s); fills only from book moves\n", e.what());
+    }
     od::LiveBook book(table);
     for (const auto& u : reader->snapshot()) book.apply(u);
 
@@ -264,6 +279,19 @@ int main(int argc, char** argv) {
     double edge_sum_vol = 0.0;  // model edge at fill, in vol points, summed over contracts
     double edge_qty = 0.0;
     std::uint64_t hedges = 0;
+
+    // Mark-outs: how each fill looks against the market mid 1 s, 5 s and 30 s later.
+    // Edge at fill is what the model thought; the mark-out is what the market did.
+    // Consistently negative mark-outs mean the counterparties knew something.
+    constexpr std::array<int, 3> kHorizons{1, 5, 30};
+    struct PendingMark {
+        std::chrono::steady_clock::time_point due;
+        std::uint32_t id;
+        double side, price, qty, vega_coin;
+        std::size_t h;
+    };
+    std::vector<PendingMark> pending_marks;
+    std::array<double, 3> mark_vol_qty{}, mark_coin{}, mark_qty{};
 
     auto theo_for = [&](const od::OptionQuote& q, double& T, double& iv) {
         const auto* em = view->expiry(q.expiry_ms);
@@ -350,6 +378,10 @@ int main(int argc, char** argv) {
                     const double edge = od::sign(o->req.side) * (theo - e.price) / vega_coin;
                     edge_sum_vol += edge * e.qty;
                     edge_qty += e.qty;
+                    const auto now = std::chrono::steady_clock::now();
+                    for (std::size_t h = 0; h < kHorizons.size(); ++h)
+                        pending_marks.push_back({now + std::chrono::seconds(kHorizons[h]), *id,
+                                                 od::sign(o->req.side), e.price, e.qty, vega_coin, h});
                     std::printf("%s FILL %-4s %4.1f %-22s @ %.4f  theo %.4f  edge %+.2f vol pts  pos %+.1f\n",
                                 hms(book.last_exch_ts_ms()).c_str(), od::to_string(o->req.side), e.qty,
                                 o->req.instrument.c_str(), e.price, theo, edge,
@@ -371,6 +403,14 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(om.fills()), om.volume(), n_pos, hedgeable_delta(),
                     risk.vega_usd, pnl_coin, ccy.c_str(), pnl_coin * view->index(), om.fees_paid(),
                     static_cast<unsigned long long>(hedges), gate.killed() ? "  KILLED" : "");
+        if (mark_qty[0] > 0.0) {
+            std::printf("         mark-outs vs mid:");
+            for (std::size_t h = 0; h < kHorizons.size(); ++h)
+                if (mark_qty[h] > 0.0)
+                    std::printf("  %2ds %+.2f vol pts (%+.5f %s, %.1f ct)", kHorizons[h],
+                                mark_vol_qty[h] / mark_qty[h], mark_coin[h], ccy.c_str(), mark_qty[h]);
+            std::printf("\n");
+        }
         if (!rejects.empty()) {
             std::printf("         rejects:");
             for (const auto& [why, n] : rejects) std::printf(" %s=%llu", why.c_str(), static_cast<unsigned long long>(n));
@@ -420,10 +460,40 @@ int main(int argc, char** argv) {
             }
             book.apply(u);
             if (quoted_index.contains(u.instrument))
-                gw.on_market(table[u.instrument].name, u.bid, u.ask);
+                gw.on_market(table[u.instrument].name, u.bid, u.ask, u.bid_amount, u.ask_amount);
             ++n;
         }
+        if (trades) {
+            od::TradeUpdate t;
+            for (;;) {
+                const auto p = trades->poll(t);
+                if (p == od::bus::TradeBusReader::Poll::Empty) break;
+                if (p == od::bus::TradeBusReader::Poll::Lapped) {
+                    ++rejects["trades_lapped"];  // events, not state: missed trades are gone
+                    trades->seek_to_end();
+                    continue;
+                }
+                ++n;
+                if (quoted_index.contains(t.instrument))
+                    gw.on_trade(table[t.instrument].name, t.price, t.amount, t.taker_buy != 0);
+            }
+        }
         process_events();
+
+        // Settle mark-outs that are due.
+        if (!pending_marks.empty()) {
+            const auto now = std::chrono::steady_clock::now();
+            std::erase_if(pending_marks, [&](const PendingMark& m) {
+                if (now < m.due) return false;
+                const auto* q = book.quote(m.id);
+                if (!q || q->bid <= 0.0 || q->ask <= 0.0) return true;  // no two-sided market: skip
+                const double move = m.side * (0.5 * (q->bid + q->ask) - m.price);
+                mark_coin[m.h] += move * m.qty;
+                mark_vol_qty[m.h] += move / m.vega_coin * m.qty;
+                mark_qty[m.h] += m.qty;
+                return true;
+            });
+        }
 
         if (g_kill && !gate.killed()) {
             gate.kill();
