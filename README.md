@@ -301,6 +301,23 @@ What it says, with the caveat that 19 minutes and 19 fills is a small sample:
   Before that, the risk gate's fat-finger band was rejecting ~14,500 such orders
   per run.
 
+**Fee-aware quoting.** Following that result, the quoter now only shows a side that
+would add to the position if its edge over theo, after tick rounding, covers the
+fee on a fill (`min_edge_to_fee`, default 1×). Position-reducing sides are always
+shown: getting out of inventory is worth paying for. The table above was run
+without it. The same recording with it on:
+
+| config | fills | contracts | P&L (BTC) | fees (BTC) | edge at fill | 5 s mark-out |
+|---|---|---|---|---|---|---|
+| dailies + 25DEC, ±6%, ±0.4 vol, no fee rule | 19 | 7.5 | −0.00137 | 0.00161 | +0.62 vol | +0.25 vol |
+| same, fee rule | 3 | 1.5 | −0.00010 | 0.00009 | +0.85 vol | +0.32 vol |
+| dailies + 25DEC, ±6%, ±0.8 vol, fee rule | 5 | 2.5 | +0.00005 | 0.00032 | +1.16 vol | +1.02 vol |
+
+The rule cut the tight config's loss by ~93% by declining fills whose fees
+exceeded their edge, at the cost of 80% of the volume. With 3–5 fills these are
+directions, not conclusions; the next step is hours of recordings across different
+sessions.
+
 ## What's in here
 
 | File | What it does |

@@ -58,10 +58,11 @@ term-structure-weighted vol shocks.
 - Simulated exchange with a queue-position fill model driven by public trade prints;
   mark-outs at 1/5/30 s.
 - Strategy extracted into an engine that drivers feed with data and time.
+- Fee-aware quoting: a position-increasing side is shown only if its edge after
+  tick rounding covers the fee.
 
-Next: more data before trusting any parameter (hours of recordings across sessions),
-a fee-aware quoting rule (don't quote where expected edge < fees), and vega limits
-per expiry for the dailies.
+Next: more data before trusting any parameter (hours of recordings across sessions)
+and vega limits per expiry for the dailies.
 
 ## M5: Order gateway + pre-trade risk
 - Authenticated JSON-RPC over WebSocket to **test.deribit.com** (testnet API keys
