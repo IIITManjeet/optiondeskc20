@@ -61,8 +61,10 @@ term-structure-weighted vol shocks.
 - Fee-aware quoting: a position-increasing side is shown only if its edge after
   tick rounding covers the fee.
 
-Next: more data before trusting any parameter (hours of recordings across sessions)
-and vega limits per expiry for the dailies.
+- Per-expiry vega limits, with worst-case vega counting our other resting orders;
+  risk recomputed after every fill.
+
+Next: more data before trusting any parameter (hours of recordings across sessions).
 
 ## M5: Order gateway + pre-trade risk
 - Authenticated JSON-RPC over WebSocket to **test.deribit.com** (testnet API keys

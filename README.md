@@ -214,9 +214,13 @@ BTC rallies.
    Convert to coin prices, round outward to Deribit's tick ladder, stay post-only,
    drop a side at the position limit.
 3. **Pre-trade risk gate** on every new order and amend: max order size, worst-case
-   position including resting orders, portfolio vega limit, fat-finger band in vol
-   terms, order-rate token bucket, kill switch (`kill -USR1`). Orders that reduce
-   the limited risk always pass, so the gate can't trap the book.
+   position, portfolio vega and **per-expiry vega** limits (worst case: our other
+   resting orders pushing the same way all fill), fat-finger band in vol terms,
+   order-rate token bucket, kill switch (`kill -USR1`). Orders that reduce the
+   limited risk always pass, so the gate can't trap the book. Vega is limited per
+   expiry because it doesn't net across expiries in practice: long daily vega and
+   short December vega are two different risks, not zero. Risk is recomputed after
+   every fill, so limits never act on stale positions.
 4. **Order manager** builds positions only from execution reports: premium cash,
    fees, inverse-perp harmonic entry and realised P&L.
 5. **Delta hedge** with the perpetual each second when USD delta leaves ±0.25 BTC,
