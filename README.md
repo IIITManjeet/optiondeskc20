@@ -12,12 +12,14 @@ Deribit's BTC/ETH options.
 - **M3, position and risk engine:** portfolio Greeks for a coin-margined book in
   both USD and coin terms, vega by expiry, and spot × vol × time scenario P&L
   revalued on the fitted surface.
-- **M4 (in progress), market maker:** vol-space quoting with inventory skew,
-  pre-trade risk gate, order manager and ledger, delta hedger, paper trading on a
-  simulated exchange driven by live data.
+- **M4, market maker (paper):** vol-space quoting with inventory skew, pre-trade
+  risk gate, order manager and ledger, delta hedger, simulated exchange with a
+  queue-position fill model driven by real trade prints, fill mark-outs.
+- **M6, record and replay:** binary market-data journal, deterministic replay of the
+  strategy engine over recorded data, config comparison.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (trade-print fill model,
-order gateway on Deribit testnet).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (order gateway on Deribit
+testnet).
 
 ```
 Deribit REST ──> Snapshot ──> OptionChain ──> per-expiry IVs ──> SVI fit ──> smile metrics
@@ -221,8 +223,19 @@ BTC rallies.
    valued on the M3 risk engine. By default the coin balance's own delta is left
    alone (`hedge_collateral`).
 
-The exchange is simulated (`SimGateway`); the strategy only sees the `Gateway`
-interface, so the Deribit testnet gateway can replace it.
+The strategy is a `MarketMaker` engine (`src/mm_engine.cpp`) that never reads a
+clock or a socket: drivers feed it market data and the time. `od_mm` drives it live;
+`od_replay` drives it from a recorded journal (see below). The exchange is simulated
+(`SimGateway`); the engine only sees the `Gateway` interface, so the Deribit testnet
+gateway can replace it.
+
+**Fill model.** `od_feedd` also publishes every public option trade on a second bus
+topic (`od_trades_BTC`). The simulator keeps a queue estimate per resting order:
+joining the best price puts us behind the displayed size, improving it puts us first,
+repricing loses priority, and displayed size shrinking at our level moves us up. A
+trade at our price eats the queue ahead before reaching us (partial fills happen);
+a trade through our price fills us. Our orders aren't in the real book, so this is
+an estimate, not a replay of what would have happened.
 
 **What paper trading showed.** `--show-quotes` puts our quotes next to the market's,
 in price and in vol (live BTC data, quoting ±0.4 vol around theo):
@@ -238,10 +251,55 @@ The listed market is one or two ticks wide, and one tick (0.0005 BTC) is worth
 0.35–0.6 vol points here. Theo sits inside the spread, but after rounding to the
 tick our quotes can only *join* the best bid/offer or sit a tick behind: there is
 no price inside the spread to improve to. Fills then depend on queue position at
-the touch, which top-of-book data can't show. Five minutes of paper trading
-produced no fills, because the simulator only fills when the opposite best price
-moves onto ours, so it misses trades that hit our level directly. The next step
-is a fill model driven by trade prints with a queue estimate.
+the touch, which is what the queue model estimates.
+
+The second constraint is how little trades. In one 10-minute live window there were
+14 BTC option trades across all ~950 options (Deribit's own trade history agrees:
+14), against ~900 ticker updates per second. Over the next hour there were 324.
+
+### Record and replay
+
+```bash
+./build/od_record --out ~/btc.odj --duration 1800        # with od_feedd running
+./build/od_replay --journal ~/btc.odj --config a.json --config b.json --quiet
+python3 tools/journal_stats.py ~/btc.odj                 # where did trades happen?
+```
+
+`od_record` journals both bus topics (binary, append-only, starting from the full
+last-value-cache state). `od_replay` runs the engine over the journal with the
+recorded timestamps as its clock and synchronous surface refits, so a replay is
+deterministic: replaying 19 minutes of real data twice gave byte-identical output,
+and a unit test checks the same on a synthetic market. It runs ~40× faster than
+real time, mostly spent refitting the surface every simulated second.
+
+Where trades happened in an 18.7-minute recording (`journal_stats.py`): 135 trades,
+concentrated in the daily expiries (10OCT26: 40, 11OCT26: 37) and 25DEC26 (39);
+104 of 135 within 5% of the forward; median size 0.2 contracts; 87 seller-initiated.
+
+Replaying that recording with different configs:
+
+| config | trades in quoted | at our price | fills | contracts | P&L (BTC) | fees (BTC) | edge at fill | 5 s mark-out |
+|---|---|---|---|---|---|---|---|---|
+| 30OCT + 27NOV, ±8% (26 options), ±1.5 vol | 2 | 0 | 0 | 0 | 0 | 0 | | |
+| same, ±0.4 vol | 2 | 0 | 0 | 0 | 0 | 0 | | |
+| 5 expiries 16OCT–25DEC, ±15%, ±0.4 vol | 45 | 1 | 0 | 0 | 0 | 0 | | |
+| dailies + 25DEC, ±6%, ±0.8 vol | 81 | 18 | 6 | 3.0 | +0.00003 | 0.00033 | +1.11 vol | +0.52 vol |
+| dailies + 25DEC, ±6%, ±0.4 vol | 81 | 26 | 19 | 7.5 | −0.00137 | 0.00161 | +0.62 vol | +0.25 vol |
+
+What it says, with the caveat that 19 minutes and 19 fills is a small sample:
+
+- **Quote where the flow is.** The first configs quoted expiries that barely traded.
+- **Tighter quotes trade more but earn less per contract**: 2.5× the volume at half
+  the edge.
+- **Fees decide it.** Deribit's option fee is capped at 12.5% of the premium, and
+  the fills were in cheap dailies (0.0002–0.0023 BTC), so fees ran at roughly 10% of
+  premium. The ±0.4 config made about +0.00024 BTC before fees and lost after them.
+- **Mark-outs were positive in this sample**, so no sign of adverse selection
+  yet; that needs far more fills to say anything.
+- On cheap dailies one tick can be several vol points, so the quoter drops a side
+  when rounding moves it more than `max_tick_vol` (5 vol) from where it wanted to be.
+  Before that, the risk gate's fat-finger band was rejecting ~14,500 such orders
+  per run.
 
 ## What's in here
 
@@ -268,7 +326,12 @@ is a fill model driven by trade prints with a queue estimate.
 | `src/risk_gate.cpp` | Pre-trade checks, token bucket, kill switch |
 | `src/orders.cpp` | Order state, positions, cash, fees, inverse-perp ledger |
 | `src/gateway.cpp` | Gateway interface, simulated exchange, hedge sizing |
-| `apps/od_mm.cpp` | Paper market maker on the feed bus |
+| `src/mm_engine.cpp` | Market-making engine: quoting, gate, fills, hedge, mark-outs |
+| `apps/od_mm.cpp` | Live driver for the engine on the feed buses |
+| `src/journal.cpp` | Binary market-data journal (writer and mmap reader) |
+| `apps/od_record.cpp` | Records the feed buses to a journal |
+| `apps/od_replay.cpp` | Deterministic replay of the engine over a journal |
+| `tools/journal_stats.py` | Where trades happen in a journal (expiry, moneyness, size) |
 
 ### Deribit conventions (verified against live data)
 

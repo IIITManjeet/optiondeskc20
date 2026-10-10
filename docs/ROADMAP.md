@@ -49,19 +49,19 @@ once we quote, M4); refitting only expiries that changed.
 Deferred: live risk in `od_live` (lands with the strategy in M4), perp funding/basis,
 term-structure-weighted vol shocks.
 
-## M4: Strategy (paper) — in progress
-Done:
+## M4: Strategy (paper) ✅
 - Vol-space quoting around the SVI theo at the live forward, inventory skew by
-  portfolio vega, Deribit tick ladder, post-only, per-side position limits.
+  portfolio vega, Deribit tick ladder, post-only, per-side position limits, and
+  no quote where the tick is too coarse in vol terms.
 - Pre-trade risk gate (size, worst-case position, vega, fat-finger band, rate limit,
   kill switch), order manager and ledger, perpetual delta hedger.
-- `od_mm` on the feed bus with a simulated exchange and a quote diagnostics table.
+- Simulated exchange with a queue-position fill model driven by public trade prints;
+  mark-outs at 1/5/30 s.
+- Strategy extracted into an engine that drivers feed with data and time.
 
-Next:
-- Fill model from trade prints (`trades.option.{ccy}.100ms` on the bus) with a
-  queue-position estimate from the displayed size at our price; the current
-  top-of-book model can't see fills at the touch.
-- Mark-outs: P&L of each fill N seconds later, to measure adverse selection.
+Next: more data before trusting any parameter (hours of recordings across sessions),
+a fee-aware quoting rule (don't quote where expected edge < fees), and vega limits
+per expiry for the dailies.
 
 ## M5: Order gateway + pre-trade risk
 - Authenticated JSON-RPC over WebSocket to **test.deribit.com** (testnet API keys
@@ -70,11 +70,12 @@ Next:
   message throttle, kill switch (signal or admin socket).
 - Learn: order state machines, idempotency, cancel-on-disconnect.
 
-## M6: Record, replay, backtest
-- Journal every inbound message with receive timestamps (binary, append-only, `mmap`).
-- Deterministic replay into the same strategy binary; fill model with queue
-  position and latency.
-- Learn: event sourcing, why naive backtests overstate PnL.
+## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
+- `od_record` journals both bus topics to a binary, append-only file; the reader
+  maps it read-only and tolerates a truncated tail.
+- `od_replay` drives the same engine from a journal with recorded timestamps and
+  synchronous refits: deterministic, ~40x real time, compares configs side by side.
+- `tools/journal_stats.py` shows where trades happen.
 
 ## M7: Run it like production
 - systemd units with `CPUAffinity=`, watchdog, restart policy.
