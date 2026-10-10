@@ -102,6 +102,8 @@ private:
     void send(Quoted& s, Side side, std::optional<double> want, const OptionQuote& q, double T,
               double theo_iv, double vega_per_contract);
     void requote();
+    void open_vega_same_dir(std::uint64_t self, bool self_live, double direction,
+                            std::int64_t expiry_ms, double& total, double& in_expiry) const;
     void process_events();
     void settle_marks();
     void hedge();

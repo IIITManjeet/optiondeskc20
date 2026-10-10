@@ -35,6 +35,8 @@ MmConfig load_mm_config(const std::string& path) {
         c.limits.max_order_qty = l->value("max_order_qty", c.limits.max_order_qty);
         c.limits.max_position = l->value("max_position", c.limits.max_position);
         c.limits.max_abs_vega_usd = l->value("max_abs_vega_usd", c.limits.max_abs_vega_usd);
+        c.limits.max_abs_vega_per_expiry_usd =
+            l->value("max_abs_vega_per_expiry_usd", c.limits.max_abs_vega_per_expiry_usd);
         c.limits.price_band_vol = l->value("price_band_vol", c.limits.price_band_vol);
         c.limits.max_orders_per_sec = l->value("max_orders_per_sec", c.limits.max_orders_per_sec);
         c.limits.burst = l->value("burst", c.limits.burst);
@@ -162,7 +164,11 @@ void MarketMaker::send(Quoted& s, Side side, std::optional<double> want, const O
     ctx.position = om_.position(s.name);
     ctx.open_same_side = om_.open_qty(s.name, side) - (live ? o->req.qty - o->filled : 0.0);
     ctx.portfolio_vega_usd = risk_.vega_usd;
+    if (const auto it = risk_.vega_by_expiry.find(q.expiry_ms); it != risk_.vega_by_expiry.end())
+        ctx.expiry_vega_usd = it->second;
     ctx.vega_per_contract_usd = vega_per_contract;
+    open_vega_same_dir(oid, live, sign(side) * vega_per_contract, q.expiry_ms,
+                       ctx.open_vega_same_dir_usd, ctx.open_expiry_vega_same_dir_usd);
     ctx.theo_iv = theo_iv;
     const auto iv = implied_vol(q.type, coin_to_usd(*want, q.underlying), q.underlying, q.strike, T);
     ctx.order_iv = iv.ok() ? iv.sigma : 0.0;
@@ -183,6 +189,25 @@ void MarketMaker::send(Quoted& s, Side side, std::optional<double> want, const O
     }
 }
 
+// Signed vega of our other live option orders that push vega the same way as
+// `direction`, in total and within `expiry_ms`: the worst case if they all fill.
+void MarketMaker::open_vega_same_dir(std::uint64_t self, bool self_live, double direction,
+                                     std::int64_t expiry_ms, double& total, double& in_expiry) const {
+    total = in_expiry = 0.0;
+    for (const auto* o : om_.live_orders()) {
+        if ((self_live && o->req.client_id == self) || is_perpetual(o->req.instrument)) continue;
+        const auto id = table_.find(o->req.instrument);
+        const auto* q = id ? book_.quote(*id) : nullptr;
+        double T, iv;
+        if (!q || !theo_for(*q, T, iv)) continue;
+        const double v = sign(o->req.side) * (o->req.qty - o->filled) *
+                         black76_greeks(q->type, q->underlying, q->strike, T, iv).vega;
+        if (v * direction <= 0.0) continue;
+        total += v;
+        if (q->expiry_ms == expiry_ms) in_expiry += v;
+    }
+}
+
 void MarketMaker::requote() {
     for (auto& s : quoted_) {
         const auto* q = book_.quote(s.id);
@@ -200,7 +225,9 @@ void MarketMaker::requote() {
 void MarketMaker::process_events() {
     events_.clear();
     gw_.poll(events_);
+    bool filled = false;
     for (const auto& e : events_) {
+        filled |= e.kind == ExecEvent::Kind::Fill;
         om_.apply(e);
         if (e.kind == ExecEvent::Kind::Rejected) ++stats_.rejects["exch:" + e.reason];
         if (e.kind != ExecEvent::Kind::Fill) continue;
@@ -226,6 +253,8 @@ void MarketMaker::process_events() {
                      hms(book_.last_exch_ts_ms()).c_str(), to_string(o->req.side), e.qty,
                      o->req.instrument.c_str(), e.price, theo, edge, om_.position(o->req.instrument));
     }
+    // Limits must see the position we have now, not the one from the last 1 s refresh.
+    if (filled && view_) refresh_risk();
 }
 
 // Mark-outs: each fill against the market mid 1 s, 5 s and 30 s later. Edge at fill
@@ -372,6 +401,16 @@ void MarketMaker::finish() {
         if (!row.priced) continue;
         std::fprintf(out_, "  %-22s %+10.2f  delta %+7.3f  vega $%+7.0f\n",
                      row.position->instrument.c_str(), row.position->qty, row.delta, row.vega_usd);
+    }
+    if (!risk_.vega_by_expiry.empty()) {
+        std::fprintf(out_, "vega by expiry ($ per vol pt):");
+        for (const auto& [exp, v] : risk_.vega_by_expiry) {
+            const std::time_t t = exp / 1000;
+            char label[16];
+            std::strftime(label, sizeof label, "%d%b%y", std::gmtime(&t));
+            std::fprintf(out_, "  %s %+.0f", label, v);
+        }
+        std::fprintf(out_, "\n");
     }
     if (stats_.edge_qty > 0)
         std::fprintf(out_, "average model edge at fill: %+.2f vol pts over %.1f contracts\n",

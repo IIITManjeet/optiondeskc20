@@ -454,3 +454,31 @@ TEST(QuoterFees, NormalOptionsAreUnaffected) {
     EXPECT_FALSE(q.ask_fee_blocked);
     EXPECT_GT(q.bid_edge_coin, od::option_fee_coin(*q.bid, 1.0));
 }
+
+// --- Per-expiry vega and worst-case open orders ------------------------------------
+
+TEST(RiskGate, PerExpiryVegaLimit) {
+    od::RiskLimits lim;
+    lim.max_abs_vega_per_expiry_usd = 500;
+    od::RiskGate g(lim);
+    auto ctx = ok_ctx();  // 100 USD vega per contract
+    ctx.portfolio_vega_usd = 0;   // the portfolio nets out...
+    ctx.expiry_vega_usd = 480;    // ...but this expiry is nearly full
+    EXPECT_EQ(g.check(opt_order(od::Side::Buy, 0.5), ctx, kT0), "max_expiry_vega");
+    EXPECT_FALSE(g.check(opt_order(od::Side::Sell, 0.5), ctx, kT0));  // reduces it: fine
+
+    lim.max_abs_vega_per_expiry_usd = 0;  // disabled
+    od::RiskGate off(lim);
+    EXPECT_FALSE(off.check(opt_order(od::Side::Buy, 0.5), ctx, kT0));
+}
+
+TEST(RiskGate, WorstCaseVegaCountsOtherRestingOrders) {
+    od::RiskLimits lim;
+    lim.max_abs_vega_per_expiry_usd = 500;
+    od::RiskGate g(lim);
+    auto ctx = ok_ctx();
+    ctx.expiry_vega_usd = 300;
+    EXPECT_FALSE(g.check(opt_order(od::Side::Buy, 0.5), ctx, kT0));  // 300 + 50
+    ctx.open_expiry_vega_same_dir_usd = 180;                          // other bids resting
+    EXPECT_EQ(g.check(opt_order(od::Side::Buy, 0.5), ctx, kT0), "max_expiry_vega");  // 530
+}

@@ -44,8 +44,9 @@ Market make_market() {
     return m;
 }
 
-od::MmConfig config() {
+od::MmConfig config(double expiry_vega_limit = 0.0) {
     od::MmConfig c;
+    c.limits.max_abs_vega_per_expiry_usd = expiry_vega_limit;
     c.expiries = {"9NOV26"};
     c.max_moneyness = 0.15;
     c.quote.half_spread_vol = 0.004;
@@ -56,17 +57,18 @@ struct Outcome {
     std::uint64_t fills = 0, trades_quoted = 0, trades_at_quote = 0;
     double volume = 0, pnl = 0, edge = 0;
     std::size_t quoted = 0;
+    double max_abs_expiry_vega = 0;  // final, USD per vol point
 };
 
 // 60 simulated seconds: the whole book every 100 ms, and every 5 s a seller hits
 // the bid of each put, with enough size to get through the displayed queue.
-Outcome run_once() {
+Outcome run_once(double expiry_vega_limit = 0.0) {
     const auto m = make_market();
     od::SimGateway gw;
     std::FILE* sink = std::fopen("/dev/null", "w");
     std::unique_ptr<od::MarketMaker> mm;
     mm = std::make_unique<od::MarketMaker>(
-        config(), m.table, "BTC", gw, &gw,
+        config(expiry_vega_limit), m.table, "BTC", gw, &gw,
         [&mm](od::OptionChain chain) {
             const auto fits = od::build_surface(chain);
             mm->set_view(std::make_shared<const od::MarketView>(od::MarketView::build(chain, fits)));
@@ -106,6 +108,12 @@ Outcome run_once() {
     o.trades_at_quote = mm->stats().trades_at_quote;
     o.edge = mm->stats().edge_vol_qty;
     o.quoted = mm->quoted();
+    // Value the final book the way the engine's risk does.
+    const auto pf = mm->orders().portfolio();
+    const auto chain = mm->book().to_chain("BTC");
+    const auto view = od::MarketView::build(chain, od::build_surface(chain));
+    for (const auto& [_, v] : od::compute_risk(pf, view).vega_by_expiry)
+        o.max_abs_expiry_vega = std::max(o.max_abs_expiry_vega, std::abs(v));
     return o;
 }
 
@@ -128,4 +136,16 @@ TEST(MmEngine, ReplayIsDeterministic) {
     EXPECT_EQ(a.volume, b.volume);
     EXPECT_EQ(a.pnl, b.pnl);
     EXPECT_EQ(a.edge, b.edge);
+}
+
+// Sellers keep hitting the put bids, so the book accumulates long vega in the one
+// expiry. With a per-expiry limit the engine stops adding once the worst case
+// (position plus resting orders) would breach it.
+TEST(MmEngine, PerExpiryVegaLimitBoundsTheBook) {
+    const auto free_run = run_once(0.0);
+    const auto limited = run_once(150.0);
+    EXPECT_GT(free_run.max_abs_expiry_vega, 150.0);  // without a limit it grows past it
+    EXPECT_GT(limited.fills, 0u);
+    EXPECT_LE(limited.max_abs_expiry_vega, 150.0 * 1.05);  // 5%: theo vs fitted-smile vega
+    EXPECT_LT(limited.volume, free_run.volume);
 }

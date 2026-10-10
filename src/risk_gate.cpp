@@ -18,10 +18,17 @@ std::optional<std::string> RiskGate::check(const OrderRequest& req, const GateCo
         if (std::abs(worst_pos) > lim_.max_position + 1e-12 && std::abs(worst_pos) > std::abs(ctx.position))
             return "max_position";
 
-        const double vega_after = ctx.portfolio_vega_usd + s * req.qty * ctx.vega_per_contract_usd;
+        const double order_vega = s * req.qty * ctx.vega_per_contract_usd;
+        const double vega_after = ctx.portfolio_vega_usd + ctx.open_vega_same_dir_usd + order_vega;
         if (std::abs(vega_after) > lim_.max_abs_vega_usd &&
             std::abs(vega_after) > std::abs(ctx.portfolio_vega_usd))
             return "max_vega";
+
+        const double expiry_after = ctx.expiry_vega_usd + ctx.open_expiry_vega_same_dir_usd + order_vega;
+        if (lim_.max_abs_vega_per_expiry_usd > 0.0 &&
+            std::abs(expiry_after) > lim_.max_abs_vega_per_expiry_usd &&
+            std::abs(expiry_after) > std::abs(ctx.expiry_vega_usd))
+            return "max_expiry_vega";
 
         if (ctx.theo_iv > 0.0) {
             if (ctx.order_iv <= 0.0) return "price_unpriceable";
