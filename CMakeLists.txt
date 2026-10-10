@@ -48,12 +48,12 @@ if(OD_NATIVE)
 endif()
 
 # Exchange connectivity kept out of od_core so pricing/vol code has no I/O deps.
-add_library(od_deribit src/deribit.cpp src/portfolio_io.cpp)
+add_library(od_deribit src/deribit.cpp src/portfolio_io.cpp src/deribit_orders.cpp)
 target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CURL::libcurl)
 
 # Streaming feed: Boost.Beast WebSocket over OpenSSL.
 add_library(od_feed src/deribit_feed.cpp src/ticker_parser.cpp src/feed_bus.cpp src/journal.cpp
-  src/mm_engine.cpp)
+  src/mm_engine.cpp src/deribit_gateway.cpp)
 target_link_libraries(od_feed PUBLIC od_deribit Boost::headers OpenSSL::SSL OpenSSL::Crypto Threads::Threads
   PRIVATE simdjson::simdjson)
 
@@ -65,6 +65,9 @@ target_link_libraries(od_live PRIVATE od_feed)
 
 add_executable(od_feedd apps/od_feedd.cpp)
 target_link_libraries(od_feedd PRIVATE od_feed)
+
+add_executable(od_gw_smoke apps/od_gw_smoke.cpp)
+target_link_libraries(od_gw_smoke PRIVATE od_feed)
 
 add_executable(od_mm apps/od_mm.cpp)
 target_link_libraries(od_mm PRIVATE od_feed)
@@ -100,7 +103,8 @@ if(OD_TESTS)
     tests/test_feed_bus.cpp
     tests/test_mm.cpp
     tests/test_journal.cpp
-    tests/test_mm_engine.cpp)
+    tests/test_mm_engine.cpp
+    tests/test_deribit_orders.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)
