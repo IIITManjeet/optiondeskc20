@@ -47,6 +47,11 @@ public:
     std::optional<std::string> check(const OrderRequest& req, const GateContext& ctx,
                                      std::int64_t now_ns);
 
+    // Cancels are never refused, but they use the same exchange rate limit as new
+    // orders, so they spend a token too (the bucket can go negative, down to -burst,
+    // which delays the next new orders).
+    void spend(std::int64_t now_ns);
+
     void kill() { killed_ = true; }
     bool killed() const { return killed_; }
     const RiskLimits& limits() const { return lim_; }

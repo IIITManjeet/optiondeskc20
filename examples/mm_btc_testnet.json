@@ -1,0 +1,32 @@
+{
+  "expiries": [],
+  "min_days": 1,
+  "max_days": 3,
+  "max_moneyness": 0.02,
+  "otm_only": true,
+  "coin_balance": 100.0,
+  "requote_ms": 1000,
+  "min_requote_ticks": 2,
+  "quote": {
+    "half_spread_vol": 0.01,
+    "skew_vol_per_1k_vega": 0.005,
+    "max_skew_vol": 0.05,
+    "size": 0.1,
+    "max_position": 0.5,
+    "max_tick_vol": 0.05,
+    "min_edge_to_fee": 1.0
+  },
+  "limits": {
+    "max_order_qty": 0.2,
+    "max_position": 0.5,
+    "max_abs_vega_usd": 500,
+    "max_abs_vega_per_expiry_usd": 300,
+    "price_band_vol": 0.1,
+    "max_orders_per_sec": 3,
+    "burst": 15
+  },
+  "hedge": {
+    "threshold_coin": 0.1,
+    "hedge_collateral": false
+  }
+}

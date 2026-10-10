@@ -5,6 +5,13 @@
 
 namespace od {
 
+void RiskGate::spend(std::int64_t now_ns) {
+    if (last_ns_ != 0)
+        tokens_ = std::min(lim_.burst, tokens_ + (now_ns - last_ns_) * 1e-9 * lim_.max_orders_per_sec);
+    last_ns_ = now_ns;
+    tokens_ = std::max(-lim_.burst, tokens_ - 1.0);
+}
+
 std::optional<std::string> RiskGate::check(const OrderRequest& req, const GateContext& ctx,
                                            std::int64_t now_ns) {
     if (killed_) return "kill_switch";

@@ -482,3 +482,14 @@ TEST(RiskGate, WorstCaseVegaCountsOtherRestingOrders) {
     ctx.open_expiry_vega_same_dir_usd = 180;                          // other bids resting
     EXPECT_EQ(g.check(opt_order(od::Side::Buy, 0.5), ctx, kT0), "max_expiry_vega");  // 530
 }
+
+TEST(RiskGate, CancelsSpendRateTokens) {
+    od::RiskLimits lim;
+    lim.max_orders_per_sec = 10;
+    lim.burst = 2;
+    od::RiskGate g(lim);
+    g.spend(kT0);
+    g.spend(kT0);  // two cancels use up the burst...
+    EXPECT_EQ(g.check(opt_order(od::Side::Buy, 0.1), ok_ctx(), kT0), "rate_limit");  // ...so no new order
+    EXPECT_FALSE(g.check(opt_order(od::Side::Buy, 0.1), ok_ctx(), kT0 + 100'000'000));  // 100 ms refills one
+}

@@ -63,8 +63,10 @@ bool parse(int argc, char** argv, Args& a) {
         else if (f == "--stats-s") a.stats_s = std::atoi(v);
         else return false;
     }
-    if (a.name.empty()) a.name = "od_feed_" + a.currency;
-    if (a.trades_name.empty()) a.trades_name = "od_trades_" + a.currency;
+    // Testnet data gets its own default names so it can't be mistaken for the real market.
+    const std::string suffix = a.testnet ? "_testnet" : "";
+    if (a.name.empty()) a.name = "od_feed_" + a.currency + suffix;
+    if (a.trades_name.empty()) a.trades_name = "od_trades_" + a.currency + suffix;
     return a.capacity_pow2 >= 4 && a.capacity_pow2 <= 24 && a.stats_s > 0;
 }
 

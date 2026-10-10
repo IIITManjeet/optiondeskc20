@@ -16,7 +16,9 @@ MmConfig load_mm_config(const std::string& path) {
     if (!in) throw std::runtime_error("cannot open " + path);
     const auto j = nlohmann::json::parse(in);
     MmConfig c;
-    c.expiries = j.at("expiries").get<std::vector<std::string>>();
+    c.expiries = j.value("expiries", std::vector<std::string>{});
+    c.min_days = j.value("min_days", c.min_days);
+    c.max_days = j.value("max_days", c.max_days);
     c.max_moneyness = j.value("max_moneyness", c.max_moneyness);
     c.otm_only = j.value("otm_only", c.otm_only);
     c.coin_balance = j.value("coin_balance", c.coin_balance);
@@ -108,13 +110,23 @@ void MarketMaker::set_view(std::shared_ptr<const MarketView> view) {
     if (first) refresh_risk();
 }
 
+void MarketMaker::adopt_position(const std::string& instrument, double qty, double entry_price) {
+    om_.adopt(instrument, qty, entry_price);
+    if (view_) refresh_risk();
+}
+
 void MarketMaker::select_instruments() {
     for (std::uint32_t id = 0; id < table_.size(); ++id) {
         const auto* q = book_.quote(id);
         if (!q || q->underlying <= 0.0) continue;
         const auto dash1 = q->name.find('-');
         const auto label = q->name.substr(dash1 + 1, q->name.find('-', dash1 + 1) - dash1 - 1);
-        if (std::find(cfg_.expiries.begin(), cfg_.expiries.end(), label) == cfg_.expiries.end()) continue;
+        if (cfg_.expiries.empty()) {
+            const double days = static_cast<double>(q->expiry_ms - book_.last_exch_ts_ms()) / 86'400'000.0;
+            if (days < cfg_.min_days || days > cfg_.max_days) continue;
+        } else if (std::find(cfg_.expiries.begin(), cfg_.expiries.end(), label) == cfg_.expiries.end()) {
+            continue;
+        }
         const double k = std::log(q->strike / q->underlying);
         if (std::abs(k) > cfg_.max_moneyness) continue;
         if (cfg_.otm_only && (q->type == OptionType::Call ? k < 0 : k >= 0)) continue;
@@ -154,7 +166,10 @@ void MarketMaker::send(Quoted& s, Side side, std::optional<double> want, const O
     const Order* o = oid ? om_.find(oid) : nullptr;
     const bool live = o && o->live();
     if (!want) {
-        if (live) gw_.cancel(oid);
+        if (live) {
+            gate_.spend(to_ns(now_));
+            gw_.cancel(oid);
+        }
         return;
     }
     if (live && std::abs(o->req.price - *want) < cfg_.min_requote_ticks * option_tick(*want) - 1e-12)
@@ -176,7 +191,10 @@ void MarketMaker::send(Quoted& s, Side side, std::optional<double> want, const O
     OrderRequest req{live ? oid : om_.next_id(), s.name, side, *want, cfg_.quote.size, true};
     if (const auto why = gate_.check(req, ctx, to_ns(now_))) {
         ++stats_.rejects[*why];
-        if (live && *why != "rate_limit") gw_.cancel(oid);  // don't leave a stale quote working
+        if (live && *why != "rate_limit") {  // don't leave a stale quote working
+            gate_.spend(to_ns(now_));
+            gw_.cancel(oid);
+        }
         return;
     }
     if (live) {

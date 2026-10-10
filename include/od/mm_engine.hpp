@@ -27,7 +27,10 @@
 namespace od {
 
 struct MmConfig {
+    // Which expiries to quote: by label, or (if the list is empty) every expiry
+    // between min_days and max_days away, so a config doesn't go stale.
     std::vector<std::string> expiries;
+    double min_days = 0.5, max_days = 10.0;
     double max_moneyness = 0.08;
     bool otm_only = true;
     double coin_balance = 2.0;
@@ -72,6 +75,9 @@ public:
     void on_timer(Clock::time_point now);
 
     void set_show_quotes(bool on) { show_quotes_ = on; }
+    // Start with a position that already exists on the exchange, so risk and
+    // hedging include it. Call before trading starts.
+    void adopt_position(const std::string& instrument, double qty, double entry_price);
     void kill();     // cancel everything, block new orders
     void finish();   // cancel everything, print the final report
 

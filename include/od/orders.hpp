@@ -72,6 +72,8 @@ public:
     // Record a price/qty amendment as sent.
     void on_amend_sent(std::uint64_t id, double price, double qty);
     void apply(const ExecEvent& e);
+    // Record a position that exists before we start (no cash flow: it's already paid for).
+    void adopt(const std::string& instrument, double qty, double entry_price);
 
     const Order* find(std::uint64_t id) const;
     std::vector<const Order*> live_orders() const;

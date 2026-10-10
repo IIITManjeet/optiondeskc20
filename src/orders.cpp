@@ -136,6 +136,13 @@ void OrderManager::apply(const ExecEvent& e) {
     }
 }
 
+void OrderManager::adopt(const std::string& instrument, double qty, double entry_price) {
+    auto& h = holdings_[instrument];
+    h.perp = is_perpetual(instrument);
+    h.qty = qty;
+    h.entry = entry_price;
+}
+
 Portfolio OrderManager::portfolio() const {
     Portfolio pf;
     pf.currency = currency_;
