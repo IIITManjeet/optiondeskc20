@@ -66,12 +66,16 @@ term-structure-weighted vol shocks.
 
 Next: more data before trusting any parameter (hours of recordings across sessions).
 
-## M5: Order gateway + pre-trade risk
-- Authenticated JSON-RPC over WebSocket to **test.deribit.com** (testnet API keys
-  read from the environment, never committed).
-- Risk gate: max order size, position and vega limits, price bands vs theo,
-  message throttle, kill switch (signal or admin socket).
-- Learn: order state machines, idempotency, cancel-on-disconnect.
+## M5: Order gateway (testnet) ✅
+- `DeribitGateway` on its own thread, connected to the strategy by SPSC rings; host
+  fixed to test.deribit.com. Protocol logic in `DeribitOrders`, unit-tested.
+- Per connection: auth with token refresh, cancel-on-disconnect, rate limits read
+  from the account, existing-position check, cancel leftovers, subscribe.
+- Trading requests paced below the account's limit through a queue (cancels first).
+- `od_mm --gateway testnet`; `od_gw_smoke` end-to-end check.
+
+Next: mass quotes (one request for many quotes) to quote more instruments within
+the rate limit; market-maker protection settings.
 
 ## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
 - `od_record` journals both bus topics to a binary, append-only file; the reader

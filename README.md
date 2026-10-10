@@ -15,11 +15,13 @@ Deribit's BTC/ETH options.
 - **M4, market maker (paper):** vol-space quoting with inventory skew, pre-trade
   risk gate, order manager and ledger, delta hedger, simulated exchange with a
   queue-position fill model driven by real trade prints, fill mark-outs.
+- **M5, testnet order gateway:** the same engine sends real orders to Deribit's
+  testnet (play money) through a gateway thread connected by lock-free rings, with
+  cancel-on-disconnect and pacing to the exchange's rate limit.
 - **M6, record and replay:** binary market-data journal, deterministic replay of the
   strategy engine over recorded data, config comparison.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next (order gateway on Deribit
-testnet).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
 
 ```
 Deribit REST ──> Snapshot ──> OptionChain ──> per-expiry IVs ──> SVI fit ──> smile metrics
@@ -322,6 +324,71 @@ exceeded their edge, at the cost of 80% of the volume. With 3–5 fills these ar
 directions, not conclusions; the next step is hours of recordings across different
 sessions.
 
+## Testnet order gateway (M5)
+
+Real orders on [Deribit testnet](https://test.deribit.com) (play money). The gateway's
+host is a compile-time constant, `test.deribit.com`; there is no way to point it at
+the real exchange.
+
+```bash
+# API key from test.deribit.com, scopes trade:read_write + account:read, stored outside the repo:
+#   ~/.config/optionsdesk/testnet.env   (export DERIBIT_CLIENT_ID=... / DERIBIT_CLIENT_SECRET=...)
+source ~/.config/optionsdesk/testnet.env
+./build/od_gw_smoke                                     # end-to-end check, leaves nothing open
+./build/od_feedd --currency BTC --testnet               # testnet market data -> od_feed_BTC_testnet
+./build/od_mm --gateway testnet --config examples/mm_btc_testnet.json
+```
+
+```
+strategy thread                            gateway thread (Boost.Asio, async TLS WebSocket)
+  place / amend / cancel ──[SPSC ring]──>    pacing queue ──> JSON-RPC ──> test.deribit.com
+         + io_context::post (wake-up)
+  poll() <────────────────[SPSC ring]────    execution reports <── user.orders / user.trades
+```
+
+The strategy thread never touches the network: commands and execution reports cross
+threads through fixed-size SPSC rings, and `post` only wakes the gateway. Protocol
+logic (`DeribitOrders`) has no I/O and is unit-tested: amends and cancels issued
+before the exchange acknowledges an order are held and sent once it does; the same
+fill reported by the RPC response and by `user.trades` is counted once; a refused
+amend reports the price still working; orders from other runs are ignored.
+
+On every connection, before reporting ready: authenticate (refreshing the token
+before expiry), enable **cancel-on-disconnect** (if the connection dies, the exchange
+cancels our orders), read the account's rate limits, report existing positions
+(`od_mm` refuses to trade on top of positions it didn't create, unless told to
+`--adopt-positions` them into risk), cancel leftover orders, subscribe.
+
+`od_gw_smoke` against testnet:
+
+| step | result | round trip |
+|---|---|---|
+| connect, auth, cancel-on-disconnect, positions | ok, account flat | 1.9 s |
+| resting option bid at the minimum price | ack | 211 ms |
+| amend by one tick | ack at the new price | 215 ms |
+| cancel | confirmed | 203 ms |
+| post-only bid at the offer | rejected (`post_only_reject`), not traded | 203 ms |
+| buy / sell $10 of the perpetual | filled, fee 6e-8 BTC each | 208 / 210 ms |
+
+The ~200 ms is network distance to the exchange; the reported perpetual fee matches
+the model in `od/fees.hpp` (0.05% × $10 / price).
+
+**Rate limits.** The first market-making run on testnet was disconnected by the
+exchange every 15–30 s. Capturing the WebSocket close frame showed why:
+`over_limit`. The account allows **5 trading requests per second (burst 20) across
+place, amend and cancel combined**, and quoting ~50 options both sides with
+frequent requotes is far beyond that (it's what Deribit's mass-quote API exists for).
+The engine's token bucket only covered new orders and amends; cancels bypassed it.
+Now the gateway reads the limits from the account on connect and paces every trading
+request at 80% of them through a queue (cancels first, nothing dropped), cancels
+spend engine tokens too, and the testnet config quotes 14 options with 1 s requotes.
+The next 3-minute run: no disconnects, ~20 quotes live throughout, and at exit
+Deribit's own API reported 0 open orders and 0 positions.
+
+The testnet options market is thin and sometimes unrealistic (one expiry was quoted
+77% vol bid / 400% offered), so testnet shows that the plumbing works, not what a
+strategy would earn.
+
 ## What's in here
 
 | File | What it does |
@@ -353,6 +420,9 @@ sessions.
 | `apps/od_record.cpp` | Records the feed buses to a journal |
 | `apps/od_replay.cpp` | Deterministic replay of the engine over a journal |
 | `tools/journal_stats.py` | Where trades happen in a journal (expiry, moneyness, size) |
+| `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
+| `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
+| `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |
 
 ### Deribit conventions (verified against live data)
 
