@@ -10,6 +10,10 @@
 //                quotes: sell more eagerly, buy less eagerly (Avellaneda-Stoikov
 //                inventory term, expressed in vol and driven by portfolio vega)
 //   half spread: what we charge for liquidity, in vol points
+//   fees       : a side that would add to the position is only quoted if its edge
+//                over theo, in coin, covers the exchange fee (times a margin).
+//                Position-reducing sides are always quoted: getting out of
+//                inventory is worth paying for.
 //
 // Then: convert to coin prices, round outward to Deribit's tick ladder, stay
 // post-only (never cross the current book), and drop a side when the position
@@ -35,6 +39,10 @@ struct QuoteParams {
     // wanted. On cheap short-dated options one tick can be several vol points, and
     // a quote that far from theo isn't the quote we meant to make.
     double max_tick_vol = 0.05;
+    // Quote a position-increasing side only if (edge over theo) >= this x fee, per
+    // contract. Deribit's fee is up to 12.5% of premium, which on cheap options can
+    // exceed any edge we'd charge. 0 disables the check.
+    double min_edge_to_fee = 1.0;
 };
 
 struct QuoteInputs {
@@ -54,6 +62,8 @@ struct Quote {
     double theo_coin = 0.0;
     double bid_iv = 0.0, ask_iv = 0.0;
     double skew_vol = 0.0;
+    double bid_edge_coin = 0.0, ask_edge_coin = 0.0;  // vs theo, per contract, after rounding
+    bool bid_fee_blocked = false, ask_fee_blocked = false;
 };
 
 Quote make_quote(const QuoteInputs& in, const QuoteParams& p);

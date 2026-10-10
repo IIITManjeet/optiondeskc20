@@ -20,12 +20,6 @@ const char* to_string(OrderState s) {
 
 bool is_perpetual(const std::string& instrument) { return instrument.ends_with("PERPETUAL"); }
 
-double option_fee_coin(double price_coin, double qty) {
-    return std::min(0.0003, 0.125 * price_coin) * qty;
-}
-
-double perp_taker_fee_coin(double usd, double price) { return 0.0005 * std::abs(usd) / price; }
-
 OrderManager::OrderManager(std::string currency, double coin_balance)
     : currency_(std::move(currency)), coin_(coin_balance) {}
 

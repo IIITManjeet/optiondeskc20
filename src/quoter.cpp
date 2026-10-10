@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "od/fees.hpp"
 #include "od/implied_vol.hpp"
 
 namespace od {
@@ -52,10 +53,21 @@ Quote make_quote(const QuoteInputs& in, const QuoteParams& p) {
     const bool bid_ok = bid >= option_tick(0.0) && std::abs(vol_of(bid) - q.bid_iv) <= p.max_tick_vol;
     const bool ask_ok = ask > 0.0 && std::abs(vol_of(ask) - q.ask_iv) <= p.max_tick_vol;
 
+    // Edge over theo after rounding, against the fee we'd pay on a fill. Only
+    // checked for sides that add to the position; reducing sides always pass.
+    q.bid_edge_coin = q.theo_coin - bid;
+    q.ask_edge_coin = ask - q.theo_coin;
+    if (p.min_edge_to_fee > 0.0) {
+        q.bid_fee_blocked = in.position >= 0.0 &&
+                            q.bid_edge_coin < p.min_edge_to_fee * option_fee_coin(bid, 1.0);
+        q.ask_fee_blocked = in.position <= 0.0 &&
+                            q.ask_edge_coin < p.min_edge_to_fee * option_fee_coin(ask, 1.0);
+    }
+
     const bool can_buy = in.position + p.size <= p.max_position + 1e-12;
     const bool can_sell = in.position - p.size >= -p.max_position - 1e-12;
-    if (can_buy && bid_ok) q.bid = bid;
-    if (can_sell && ask_ok) q.ask = ask;
+    if (can_buy && bid_ok && !q.bid_fee_blocked) q.bid = bid;
+    if (can_sell && ask_ok && !q.ask_fee_blocked) q.ask = ask;
     if (q.bid && q.ask && *q.bid >= *q.ask) q.bid.reset();  // degenerate after clamping
     return q;
 }

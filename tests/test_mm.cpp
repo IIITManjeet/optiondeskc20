@@ -402,3 +402,55 @@ TEST(Quoter, SkipsSidesWhereTheTickIsTooCoarseInVol) {
     const auto loose = od::make_quote(in, p);
     EXPECT_TRUE(loose.ask);
 }
+
+// --- Fee-aware quoting --------------------------------------------------------------
+
+namespace {
+// A cheap OTM daily: theo ~0.00096 BTC, so the 12.5%-of-premium fee cap applies
+// (~0.00012 per contract), and 0.2 vol of edge rounds to ~0.00005: less than the
+// fee on both sides. (Near 0.005 BTC the tick jumps to 0.0005 and rounding alone
+// can create enough edge, so the test stays well below that boundary.)
+od::QuoteInputs cheap_daily() {
+    od::QuoteInputs in;
+    in.type = od::OptionType::Call;
+    in.strike = 85000;
+    in.forward = 82000;
+    in.T = 1.5 / 365;
+    in.theo_iv = 0.40;
+    return in;
+}
+}  // namespace
+
+TEST(QuoterFees, BlocksSidesWhoseEdgeDoesNotCoverTheFee) {
+    od::QuoteParams p;
+    p.half_spread_vol = 0.002;  // 0.2 vol: tiny edge in coin
+    p.max_tick_vol = 1.0;       // isolate the fee rule from the tick rule
+    const auto q = od::make_quote(cheap_daily(), p);
+    EXPECT_TRUE(q.bid_fee_blocked);
+    EXPECT_TRUE(q.ask_fee_blocked);
+    EXPECT_FALSE(q.bid);
+    EXPECT_FALSE(q.ask);
+
+    p.min_edge_to_fee = 0.0;  // check disabled: both sides come back
+    const auto off = od::make_quote(cheap_daily(), p);
+    EXPECT_TRUE(off.bid || off.ask);
+}
+
+TEST(QuoterFees, PositionReducingSideIsAlwaysQuoted) {
+    od::QuoteParams p;
+    p.half_spread_vol = 0.002;
+    p.max_tick_vol = 1.0;
+    auto in = cheap_daily();
+    in.position = 1.0;  // long: the offer reduces the position
+    const auto q = od::make_quote(in, p);
+    EXPECT_FALSE(q.ask_fee_blocked);
+    EXPECT_TRUE(q.bid_fee_blocked);
+}
+
+TEST(QuoterFees, NormalOptionsAreUnaffected) {
+    // ~0.03 BTC premium, 1.5 vol half-spread: edge is several times the 0.0003 fee.
+    const auto q = od::make_quote(base_inputs(), {});
+    EXPECT_FALSE(q.bid_fee_blocked);
+    EXPECT_FALSE(q.ask_fee_blocked);
+    EXPECT_GT(q.bid_edge_coin, od::option_fee_coin(*q.bid, 1.0));
+}

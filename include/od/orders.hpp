@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "od/fees.hpp"
 #include "od/risk.hpp"
 
 namespace od {
@@ -106,11 +107,5 @@ private:
 };
 
 bool is_perpetual(const std::string& instrument);
-
-// Approximate Deribit fees (check the current schedule before relying on them):
-// options 0.03% of the underlying per contract, i.e. 0.0003 coin, capped at 12.5%
-// of the option price; perpetual taker 0.05% of notional.
-double option_fee_coin(double price_coin, double qty);
-double perp_taker_fee_coin(double usd, double price);
 
 }  // namespace od

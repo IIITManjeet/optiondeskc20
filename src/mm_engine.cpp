@@ -29,6 +29,7 @@ MmConfig load_mm_config(const std::string& path) {
         c.quote.size = q->value("size", c.quote.size);
         c.quote.max_position = q->value("max_position", c.quote.max_position);
         c.quote.max_tick_vol = q->value("max_tick_vol", c.quote.max_tick_vol);
+        c.quote.min_edge_to_fee = q->value("min_edge_to_fee", c.quote.min_edge_to_fee);
     }
     if (const auto l = j.find("limits"); l != j.end()) {
         c.limits.max_order_qty = l->value("max_order_qty", c.limits.max_order_qty);
