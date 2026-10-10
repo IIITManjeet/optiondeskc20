@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "od/implied_vol.hpp"
+
 namespace od {
 
 double option_tick(double price_coin) { return price_coin >= 0.005 ? 0.0005 : 0.0001; }
@@ -42,10 +44,18 @@ Quote make_quote(const QuoteInputs& in, const QuoteParams& p) {
     if (in.best_bid > 0.0 && ask <= in.best_bid)
         ask = round_to_tick(in.best_bid + option_tick(in.best_bid), false);
 
+    // How far did rounding (and post-only clamping) move each side, in vol?
+    auto vol_of = [&](double coin) {
+        const auto r = implied_vol(in.type, coin_to_usd(coin, in.forward), in.forward, in.strike, in.T);
+        return r.ok() ? r.sigma : -1.0;
+    };
+    const bool bid_ok = bid >= option_tick(0.0) && std::abs(vol_of(bid) - q.bid_iv) <= p.max_tick_vol;
+    const bool ask_ok = ask > 0.0 && std::abs(vol_of(ask) - q.ask_iv) <= p.max_tick_vol;
+
     const bool can_buy = in.position + p.size <= p.max_position + 1e-12;
     const bool can_sell = in.position - p.size >= -p.max_position - 1e-12;
-    if (can_buy && bid >= option_tick(0.0)) q.bid = bid;
-    if (can_sell && ask > 0.0) q.ask = ask;
+    if (can_buy && bid_ok) q.bid = bid;
+    if (can_sell && ask_ok) q.ask = ask;
     if (q.bid && q.ask && *q.bid >= *q.ask) q.bid.reset();  // degenerate after clamping
     return q;
 }

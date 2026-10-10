@@ -31,6 +31,10 @@ struct QuoteParams {
     double max_skew_vol = 0.05;
     double size = 0.5;                  // contracts per side
     double max_position = 3.0;          // per instrument, contracts
+    // Drop a side when tick rounding moves it further than this from the vol we
+    // wanted. On cheap short-dated options one tick can be several vol points, and
+    // a quote that far from theo isn't the quote we meant to make.
+    double max_tick_vol = 0.05;
 };
 
 struct QuoteInputs {

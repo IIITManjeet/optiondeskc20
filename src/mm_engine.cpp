@@ -28,6 +28,7 @@ MmConfig load_mm_config(const std::string& path) {
         c.quote.max_skew_vol = q->value("max_skew_vol", c.quote.max_skew_vol);
         c.quote.size = q->value("size", c.quote.size);
         c.quote.max_position = q->value("max_position", c.quote.max_position);
+        c.quote.max_tick_vol = q->value("max_tick_vol", c.quote.max_tick_vol);
     }
     if (const auto l = j.find("limits"); l != j.end()) {
         c.limits.max_order_qty = l->value("max_order_qty", c.limits.max_order_qty);

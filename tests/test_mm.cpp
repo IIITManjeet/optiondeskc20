@@ -385,3 +385,20 @@ TEST(SimQueue, RepricingLosesPriority) {
     drain(gw);
     EXPECT_DOUBLE_EQ(gw.queue_ahead(1), 5.0);
 }
+
+TEST(Quoter, SkipsSidesWhereTheTickIsTooCoarseInVol) {
+    // A cheap option one day from expiry: one 0.0001 tick is several vol points.
+    od::QuoteInputs in;
+    in.type = od::OptionType::Call;
+    in.strike = 90000;
+    in.forward = 82000;
+    in.T = 1.0 / 365;
+    in.theo_iv = 0.45;
+    od::QuoteParams p;
+    const auto q = od::make_quote(in, p);
+    EXPECT_FALSE(q.bid && q.ask) << "both sides survived rounding a ~0-premium option";
+
+    p.max_tick_vol = 10.0;  // tolerate anything: sides come back
+    const auto loose = od::make_quote(in, p);
+    EXPECT_TRUE(loose.ask);
+}
