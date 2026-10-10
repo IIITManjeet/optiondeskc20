@@ -44,7 +44,8 @@ struct GatewayConfig {
 
 struct ExistingPosition {
     std::string instrument;
-    double size;  // options: contracts; futures/perp: USD
+    double size;           // options: contracts; futures/perp: USD
+    double average_price;  // options: coin; futures/perp: USD
 };
 
 class DeribitGateway : public Gateway {
@@ -65,6 +66,8 @@ public:
     std::vector<ExistingPosition> existing_positions() const;
     std::string last_error() const;
     std::uint64_t reconnects() const { return reconnects_.load(); }
+    // Trading requests waiting for the rate limiter.
+    std::size_t queued() const { return queued_.load(); }
 
 private:
     struct Cmd {
@@ -95,6 +98,7 @@ private:
 
     std::atomic<bool> stop_{false}, ready_{false}, positions_checked_{false};
     std::atomic<std::uint64_t> reconnects_{0};
+    std::atomic<std::size_t> queued_{0};
     mutable std::mutex mu_;  // guards session_, positions_, last_error_
     Session* session_ = nullptr;
     std::vector<ExistingPosition> positions_;

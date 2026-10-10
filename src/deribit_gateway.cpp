@@ -150,6 +150,7 @@ void DeribitGateway::run() {
     od::name_current_thread("od-gateway");
     DeribitOrders orders(run_label());
     int backoff_s = 1;
+    bool first_session = true;
     while (!stop_.load()) {
         try {
             // session() only returns by throwing or on stop.
@@ -205,12 +206,26 @@ void DeribitGateway::run() {
             std::vector<ExistingPosition> pos;
             for (const auto& p : call("private/get_positions", {{"currency", cfg_.currency}}))
                 if (const double size = p.value("size", 0.0); size != 0.0)
-                    pos.push_back({p.value("instrument_name", std::string{}), size});
+                    pos.push_back({p.value("instrument_name", std::string{}), size,
+                                   p.value("average_price", 0.0)});
             {
                 std::lock_guard lk(mu_);
                 positions_ = std::move(pos);
             }
             positions_checked_ = true;
+
+            // The account's limit on trading requests (place, amend, cancel), shared by
+            // all of them. Exceeding it gets the connection closed ("over_limit"),
+            // so pace below it.
+            double rate = 5.0, burst = 20.0;
+            const auto summary = call("private/get_account_summary", {{"currency", cfg_.currency}, {"extended", true}});
+            if (const auto l = summary.find("limits"); l != summary.end()) {
+                const auto t = l->value("/matching_engine/trading/total"_json_pointer, json::object());
+                rate = t.value("rate", rate);
+                burst = t.value("burst", burst);
+            }
+            rate *= 0.8;
+            burst = std::max(1.0, std::floor(burst * 0.8));
 
             call("private/cancel_all_by_currency", {{"currency", cfg_.currency}});
             call("private/subscribe",
@@ -234,11 +249,48 @@ void DeribitGateway::run() {
                 write_next();
             };
 
+            // Trading requests go through a token bucket and wait in a queue rather than
+            // being dropped. Cancels go to the front: pulling a quote is always more
+            // urgent than placing one. (A cancel can't overtake the place of the same
+            // order: DeribitOrders only issues it once the order is acknowledged.)
+            // After a reconnect we start with an empty bucket, since the usual reason
+            // for a disconnect is that the exchange's credits ran out.
+            double tokens = first_session ? burst : 0.0;
+            first_session = false;
+            auto last_refill = std::chrono::steady_clock::now();
+            std::deque<std::string> trading_q;
+            net::steady_timer pace{s.ioc};
+            bool pace_armed = false;
+            std::function<void()> pump = [&] {
+                const auto now = std::chrono::steady_clock::now();
+                tokens = std::min(burst, tokens + std::chrono::duration<double>(now - last_refill).count() * rate);
+                last_refill = now;
+                while (!trading_q.empty() && tokens >= 1.0) {
+                    tokens -= 1.0;
+                    send(std::move(trading_q.front()));
+                    trading_q.pop_front();
+                }
+                queued_ = trading_q.size();
+                if (trading_q.empty() || pace_armed) return;
+                pace_armed = true;
+                pace.expires_after(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>((1.0 - tokens) / rate)));
+                pace.async_wait([&](beast::error_code ec) {
+                    pace_armed = false;
+                    if (!ec) pump();
+                });
+            };
+            auto send_trading = [&](std::string m) {
+                if (m.find("\"private/cancel") != std::string::npos) trading_q.push_front(std::move(m));
+                else trading_q.push_back(std::move(m));
+                pump();
+            };
+
             std::vector<ExecEvent> evs;
             std::vector<std::string> to_send;
             auto deliver = [&] {
                 for (const auto& e : evs) push_event(e);
-                for (auto& m : to_send) send(std::move(m));
+                for (auto& m : to_send) send_trading(std::move(m));
                 evs.clear();
                 to_send.clear();
             };
@@ -255,7 +307,7 @@ void DeribitGateway::run() {
                         case Cmd::Kind::Cancel: m = orders.cancel(c.client_id); break;
                         case Cmd::Kind::CancelAll: m = orders.cancel_all(cfg_.currency); break;
                     }
-                    if (m) send(std::move(*m));
+                    if (m) send_trading(std::move(*m));
                 }
             };
 
@@ -275,6 +327,12 @@ void DeribitGateway::run() {
                     if (ec) {
                         std::lock_guard lk(mu_);
                         last_error_ = "read: " + ec.message();
+                        // The server's close frame says why it hung up.
+                        if (ec == websocket::error::closed) {
+                            const auto& r = s.ws.reason();
+                            last_error_ += " (close code " + std::to_string(r.code) + " " +
+                                           std::string(r.reason.data(), r.reason.size()) + ")";
+                        }
                         return s.ioc.stop();
                     }
                     const auto j = json::parse(beast::buffers_to_string(s.buf.data()), nullptr, false);
@@ -309,7 +367,10 @@ void DeribitGateway::run() {
             ready_ = true;
             backoff_s = 1;
             drain();  // anything queued while we were connecting
-            std::fprintf(stderr, "gateway: connected to %s (testnet), cancel-on-disconnect on\n", kTestnetHost);
+            std::fprintf(stderr,
+                         "gateway: connected to %s (testnet), cancel-on-disconnect on, "
+                         "pacing trading requests at %.1f/s (burst %.0f)\n",
+                         kTestnetHost, rate, burst);
             s.ioc.run();
 
             ready_ = false;
