@@ -54,14 +54,18 @@ Result run(const std::string& journal_path, const std::string& config_path, bool
     const auto wall0 = std::chrono::steady_clock::now();
     od::journal::Event e;
     std::int64_t first_ts = 0, last_ts = 0;
+    auto tick = [&](std::int64_t ts) { mm->on_timer(od::Clock::time_point(std::chrono::nanoseconds(ts))); };
     while (j.next(e)) {
+        // Everything recorded at one instant (e.g. the opening snapshot) is applied
+        // before the clock moves, as it would have been live.
         if (first_ts == 0) first_ts = e.ts_ns;
+        else if (e.ts_ns != last_ts) tick(last_ts);
         last_ts = e.ts_ns;
         if (e.type == od::journal::RecordType::Ticker) mm->on_ticker(e.ticker);
         else mm->on_trade(e.trade);
-        mm->on_timer(od::Clock::time_point(std::chrono::nanoseconds(e.ts_ns)));
         ++r.events;
     }
+    if (r.events > 0) tick(last_ts);
     mm->finish();
     r.wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall0).count();
     r.sim_s = (last_ts - first_ts) / 1e9;
@@ -100,17 +104,23 @@ int main(int argc, char** argv) {
             if (!quiet) std::printf("=== %s\n", c.c_str());
             results.push_back(run(journal, c, !quiet, status_ms));
         }
-        std::printf("\n%-34s %9s %7s %7s %7s %10s %9s %13s %13s\n", "config", "events", "x real",
-                    "fills", "volume", "pnl(coin)", "fees", "edge@fill", "markout 5s");
+        std::printf("\n%-18s %8s %6s %7s %7s %6s %7s %10s %9s %13s %13s\n", "config", "events",
+                    "x real", "trades", "at_px", "fills", "volume", "pnl(coin)", "fees", "edge@fill",
+                    "markout 5s");
         for (const auto& r : results) {
             const auto& s = r.stats;
             const double edge = s.edge_qty > 0 ? s.edge_vol_qty / s.edge_qty : 0.0;
             const double m5 = s.mark_qty[1] > 0 ? s.mark_vol_qty[1] / s.mark_qty[1] : 0.0;
-            std::printf("%-34s %9llu %7.0f %7llu %7.1f %+10.5f %9.5f %+9.2f vol %+9.2f vol\n",
-                        r.config.c_str(), static_cast<unsigned long long>(r.events),
-                        r.wall_s > 0 ? r.sim_s / r.wall_s : 0.0, static_cast<unsigned long long>(r.fills),
-                        r.volume, r.pnl, r.fees, edge, m5);
+            const auto slash = r.config.find_last_of('/');
+            const std::string name = slash == std::string::npos ? r.config : r.config.substr(slash + 1);
+            std::printf("%-18s %8llu %6.0f %7llu %7llu %6llu %7.1f %+10.5f %9.5f %+9.2f vol %+9.2f vol\n",
+                        name.c_str(), static_cast<unsigned long long>(r.events),
+                        r.wall_s > 0 ? r.sim_s / r.wall_s : 0.0,
+                        static_cast<unsigned long long>(s.trades_quoted),
+                        static_cast<unsigned long long>(s.trades_at_quote),
+                        static_cast<unsigned long long>(r.fills), r.volume, r.pnl, r.fees, edge, m5);
         }
+        std::printf("\ntrades = public trades in quoted instruments; at_px = at one of our resting prices\n");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

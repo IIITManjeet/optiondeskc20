@@ -98,10 +98,10 @@ void MarketMaker::set_view(std::shared_ptr<const MarketView> view) {
     if (!view) return;
     const bool first = view_ == nullptr;
     view_ = std::move(view);
-    if (first) {
-        select_instruments();
-        refresh_risk();
-    }
+    // Pick what to quote from the book as it is now; retry on later surfaces if the
+    // book wasn't populated enough yet to match anything.
+    if (quoted_.empty()) select_instruments();
+    if (first) refresh_risk();
 }
 
 void MarketMaker::select_instruments() {
