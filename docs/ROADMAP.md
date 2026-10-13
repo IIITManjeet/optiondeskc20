@@ -74,8 +74,13 @@ Next: more data before trusting any parameter (hours of recordings across sessio
 - Trading requests paced below the account's limit through a queue (cancels first).
 - `od_mm --gateway testnet`; `od_gw_smoke` end-to-end check.
 
-Next: mass quotes (one request for many quotes) to quote more instruments within
-the rate limit; market-maker protection settings.
+- Request budget allocator: quote updates scored in USD (cancels first, stale
+  too-generous amends 3x, weighted by trade activity) and sent best-first within the
+  rate limit; quote-quality metrics in status and replay.
+
+Mass quotes and MMP need exchange approval (the account returns
+`mass_quotes_disabled` / `MMP disabled`). Next: a flow prior by expiry and moneyness
+for the allocator; mass quotes if the account is enabled.
 
 ## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
 - `od_record` journals both bus topics to a binary, append-only file; the reader

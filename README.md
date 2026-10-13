@@ -389,6 +389,46 @@ The testnet options market is thin and sometimes unrealistic (one expiry was quo
 77% vol bid / 400% offered), so testnet shows that the plumbing works, not what a
 strategy would earn.
 
+### Request budget allocator
+
+Deribit's answer to the rate limit is `private/mass_quote` (up to hundreds of quotes
+per request), but the API spec says it "can only be used after approval from the
+administrators", and a probe on this account confirmed it: `mass_quotes_disabled`,
+and market maker protection (which mass quotes require) `MMP disabled`. So the engine
+has to make 4 requests/s count.
+
+Each requote cycle now plans every wanted change and spends the budget on the most
+valuable ones (`allocate_requests`, on by default), scored in USD:
+
+- **cancel** a quote we no longer want: always first.
+- **amend**: |resting price − wanted price| × size × index, ×3 if the resting order
+  has become too generous (bid too high / offer too low, the side that gets picked off).
+- **place**: the edge it would earn, |theo − wanted price| × size × index.
+- every score × (1 + recent trades in that option, decayed with a 5-minute half-life).
+
+Quote quality is sampled every cycle over every side we want to show: the share with a
+quote up, how far resting prices are from target, and the share resting on the
+generous side. Replaying the 18.7-minute recording, quoting options 0.3–25 days out
+within 10% of the forward, against the old behaviour (update instruments in a fixed
+order until the rate limit refuses):
+
+| budget | approach | quotes up | off target | too generous | fills |
+|---|---|---|---|---|---|
+| 2/s | fixed order | 41.2% | 0.10 vol | 2.5% | 6 |
+| 2/s | allocator | **58.4%** | 0.07 vol | **0.9%** | 0 |
+| 4/s | fixed order | 81.8% | 0.07 vol | 3.0% | 7 |
+| 4/s | allocator | **86.8%** | 0.06 vol | **1.1%** | 4 |
+| 8/s | fixed order | 94.4% | 0.03 vol | 1.2% | 8 |
+| 8/s | allocator | **95.7%** | 0.03 vol | **0.7%** | 6 |
+
+The allocator keeps more quotes up and cuts the dangerous stale ones by 40–65%, most
+when the budget is tight. It fills less, though. Its USD scores favour high-vega,
+longer-dated options, while the fixed order happens to start with the dailies (the
+exchange lists instruments by expiry), which is where the trades are. The activity
+weight should correct for that, but with ~65 trades in the quoted options over 19
+minutes it barely moves. A flow prior by expiry and moneyness (from `journal_stats.py`)
+is the next refinement; fills this few can't separate the two approaches on P&L.
+
 ## What's in here
 
 | File | What it does |
