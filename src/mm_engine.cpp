@@ -47,6 +47,7 @@ MmConfig load_mm_config(const std::string& path) {
         c.hedge.threshold_coin = h->value("threshold_coin", c.hedge.threshold_coin);
         c.hedge_collateral = h->value("hedge_collateral", c.hedge_collateral);
     }
+    c.allocate_requests = j.value("allocate_requests", c.allocate_requests);
     return c;
 }
 
@@ -87,8 +88,10 @@ void MarketMaker::on_trade(const TradeUpdate& t) {
     const auto it = quoted_index_.find(t.instrument);
     if (it == quoted_index_.end()) return;
     ++stats_.trades_quoted;
+    auto& s = quoted_[it->second];
+    s.activity = activity(s) + 1.0;
+    s.activity_at = now_;
     // Did it print at a price we were resting at, on the side it traded against?
-    const auto& s = quoted_[it->second];
     const std::uint64_t oid = t.taker_buy ? s.ask_order : s.bid_order;
     if (const auto* o = oid ? om_.find(oid) : nullptr; o && o->live() && std::abs(o->req.price - t.price) < 1e-9) {
         ++stats_.trades_at_quote;
@@ -160,51 +163,58 @@ double MarketMaker::pnl_coin() const {
     return value_portfolio(om_.portfolio(), *view_).equity_coin - cfg_.coin_balance;
 }
 
-void MarketMaker::send(Quoted& s, Side side, std::optional<double> want, const OptionQuote& q,
-                       double T, double theo_iv, double vega_per_contract) {
-    std::uint64_t& oid = side == Side::Buy ? s.bid_order : s.ask_order;
+// Carry out one planned action. Returns true if a request went to the gateway.
+bool MarketMaker::execute(const Action& a) {
+    Quoted& s = quoted_[a.qi];
+    const OptionQuote& q = *a.q;
+    std::uint64_t& oid = a.side == Side::Buy ? s.bid_order : s.ask_order;
     const Order* o = oid ? om_.find(oid) : nullptr;
     const bool live = o && o->live();
-    if (!want) {
-        if (live) {
-            gate_.spend(to_ns(now_));
-            gw_.cancel(oid);
-        }
-        return;
+    if (!a.want) {
+        if (!live) return false;
+        gate_.spend(to_ns(now_));
+        gw_.cancel(oid);
+        return true;
     }
-    if (live && std::abs(o->req.price - *want) < cfg_.min_requote_ticks * option_tick(*want) - 1e-12)
-        return;  // close enough: don't churn the order (and lose queue position)
 
     GateContext ctx;
     ctx.position = om_.position(s.name);
-    ctx.open_same_side = om_.open_qty(s.name, side) - (live ? o->req.qty - o->filled : 0.0);
+    ctx.open_same_side = om_.open_qty(s.name, a.side) - (live ? o->req.qty - o->filled : 0.0);
     ctx.portfolio_vega_usd = risk_.vega_usd;
     if (const auto it = risk_.vega_by_expiry.find(q.expiry_ms); it != risk_.vega_by_expiry.end())
         ctx.expiry_vega_usd = it->second;
-    ctx.vega_per_contract_usd = vega_per_contract;
-    open_vega_same_dir(oid, live, sign(side) * vega_per_contract, q.expiry_ms,
-                       ctx.open_vega_same_dir_usd, ctx.open_expiry_vega_same_dir_usd);
-    ctx.theo_iv = theo_iv;
-    const auto iv = implied_vol(q.type, coin_to_usd(*want, q.underlying), q.underlying, q.strike, T);
+    ctx.vega_per_contract_usd = a.vega_usd;
+    open_vega_same_dir(oid, live, sign(a.side) * a.vega_usd, q.expiry_ms, ctx.open_vega_same_dir_usd,
+                       ctx.open_expiry_vega_same_dir_usd);
+    ctx.theo_iv = a.theo_iv;
+    const auto iv = implied_vol(q.type, coin_to_usd(*a.want, q.underlying), q.underlying, q.strike, a.T);
     ctx.order_iv = iv.ok() ? iv.sigma : 0.0;
 
-    OrderRequest req{live ? oid : om_.next_id(), s.name, side, *want, cfg_.quote.size, true};
+    OrderRequest req{live ? oid : om_.next_id(), s.name, a.side, *a.want, cfg_.quote.size, true};
     if (const auto why = gate_.check(req, ctx, to_ns(now_))) {
         ++stats_.rejects[*why];
         if (live && *why != "rate_limit") {  // don't leave a stale quote working
             gate_.spend(to_ns(now_));
             gw_.cancel(oid);
+            return true;
         }
-        return;
+        return false;
     }
     if (live) {
-        om_.on_amend_sent(oid, *want, cfg_.quote.size);
-        gw_.amend(oid, *want, cfg_.quote.size);
+        om_.on_amend_sent(oid, *a.want, cfg_.quote.size);
+        gw_.amend(oid, *a.want, cfg_.quote.size);
     } else {
         om_.on_sent(req);
         gw_.place(req);
         oid = req.client_id;
     }
+    return true;
+}
+
+double MarketMaker::activity(const Quoted& s) const {
+    if (s.activity <= 0.0) return 0.0;
+    const double dt = std::chrono::duration<double>(now_ - s.activity_at).count();
+    return s.activity * std::exp2(-dt / 300.0);  // half-life 5 minutes
 }
 
 // Signed vega of our other live option orders that push vega the same way as
@@ -226,17 +236,82 @@ void MarketMaker::open_vega_same_dir(std::uint64_t self, bool self_live, double 
     }
 }
 
+// Plan every wanted change to our quotes, then spend the request budget on them.
+//
+// With a rate limit of a few requests per second we can't update every quote that
+// moves, so each action gets a score in USD and the budget goes to the highest:
+//   cancel : always first. A quote we don't want any more is pure risk.
+//   amend  : |resting price - wanted price| x size x index. An order that has become
+//            too generous (bid too high / offer too low: the side that gets picked
+//            off) counts 3x; one that is merely too passive is a missed opportunity.
+//   place  : the edge it would earn, |theo - wanted price| x size x index.
+// Each score is weighted by recent trade activity in the instrument (1 + decayed
+// trade count), so the budget goes where the flow is.
 void MarketMaker::requote() {
-    for (auto& s : quoted_) {
+    constexpr double kCancel = 1e12;
+    const double index = view_->index();
+    std::vector<Action> plan;
+    for (std::size_t i = 0; i < quoted_.size(); ++i) {
+        auto& s = quoted_[i];
         const auto* q = book_.quote(s.id);
         double T, theo_iv;
         if (!q || !theo_for(*q, T, theo_iv)) continue;
         const auto g = black76_greeks(q->type, q->underlying, q->strike, T, theo_iv);
+        const double vega_coin = usd_to_coin(g.vega, q->underlying);  // per vol point
         const QuoteInputs in{q->type, q->strike, q->underlying, T, theo_iv, q->bid, q->ask,
                              om_.position(s.name), risk_.vega_usd};
         const auto quote = make_quote(in, cfg_.quote);
-        send(s, Side::Buy, quote.bid, *q, T, theo_iv, g.vega);
-        send(s, Side::Sell, quote.ask, *q, T, theo_iv, g.vega);
+        const double weight = 1.0 + activity(s);
+
+        for (const Side side : {Side::Buy, Side::Sell}) {
+            const auto want = side == Side::Buy ? quote.bid : quote.ask;
+            const std::uint64_t oid = side == Side::Buy ? s.bid_order : s.ask_order;
+            const Order* o = oid ? om_.find(oid) : nullptr;
+            const bool live = o && o->live();
+
+            if (want) {  // quote quality, sampled before acting
+                ++stats_.sides_wanted;
+                if (live) {
+                    ++stats_.sides_showing;
+                    if (vega_coin > 0.0) stats_.off_target_vol += std::abs(o->req.price - *want) / vega_coin;
+                    if (sign(side) * (o->req.price - *want) > 0.5 * option_tick(*want)) ++stats_.sides_adverse;
+                }
+            }
+
+            if (!want) {
+                if (live) plan.push_back({i, side, std::nullopt, kCancel, q, T, theo_iv, g.vega});
+                continue;
+            }
+            if (live && std::abs(o->req.price - *want) < cfg_.min_requote_ticks * option_tick(*want) - 1e-12)
+                continue;  // close enough: don't churn the order (and lose queue position)
+            double score;
+            if (live) {
+                const double gap = o->req.price - *want;
+                score = std::abs(gap) * cfg_.quote.size * index * (sign(side) * gap > 0.0 ? 3.0 : 1.0);
+            } else {
+                score = std::abs(quote.theo_coin - *want) * cfg_.quote.size * index;
+            }
+            plan.push_back({i, side, want, score * weight, q, T, theo_iv, g.vega});
+        }
+    }
+
+    if (!cfg_.allocate_requests) {  // fixed order: whatever the rate limit lets through
+        for (const auto& a : plan) execute(a);
+        return;
+    }
+    std::stable_sort(plan.begin(), plan.end(),
+                     [](const Action& a, const Action& b) { return a.score > b.score; });
+    int budget = gate_.available(to_ns(now_));
+    for (const auto& a : plan) {
+        if (!a.want) {  // cancels always go; they still spend a token
+            execute(a);
+            continue;
+        }
+        if (budget <= 0) {
+            ++stats_.deferred;
+            continue;
+        }
+        if (execute(a)) --budget;
     }
 }
 
@@ -364,6 +439,9 @@ void MarketMaker::status(bool final) {
         std::fprintf(out_, " (avg queue ahead %.1f contracts)",
                      stats_.queue_ahead_at_trade / static_cast<double>(stats_.trades_at_quote));
     std::fprintf(out_, "\n");
+    std::fprintf(out_, "         quotes up %.0f%%, avg off target %.2f vol pts, too generous %.0f%%, deferred %llu\n",
+                 100 * stats_.quotes_up(), stats_.avg_off_target_vol(), 100 * stats_.adverse_share(),
+                 static_cast<unsigned long long>(stats_.deferred));
     if (stats_.mark_qty[0] > 0.0) {
         std::fprintf(out_, "         mark-outs vs mid:");
         for (std::size_t h = 0; h < kMarkHorizons.size(); ++h)

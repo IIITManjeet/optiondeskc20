@@ -12,6 +12,12 @@ void RiskGate::spend(std::int64_t now_ns) {
     tokens_ = std::max(-lim_.burst, tokens_ - 1.0);
 }
 
+int RiskGate::available(std::int64_t now_ns) const {
+    double t = tokens_;
+    if (last_ns_ != 0) t = std::min(lim_.burst, t + (now_ns - last_ns_) * 1e-9 * lim_.max_orders_per_sec);
+    return t < 1.0 ? 0 : static_cast<int>(t);
+}
+
 std::optional<std::string> RiskGate::check(const OrderRequest& req, const GateContext& ctx,
                                            std::int64_t now_ns) {
     if (killed_) return "kill_switch";

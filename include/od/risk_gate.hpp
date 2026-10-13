@@ -51,6 +51,8 @@ public:
     // orders, so they spend a token too (the bucket can go negative, down to -burst,
     // which delays the next new orders).
     void spend(std::int64_t now_ns);
+    // Whole tokens available at `now_ns` (what a new order or amend could use).
+    int available(std::int64_t now_ns) const;
 
     void kill() { killed_ = true; }
     bool killed() const { return killed_; }

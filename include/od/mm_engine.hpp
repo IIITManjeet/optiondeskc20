@@ -42,6 +42,9 @@ struct MmConfig {
     // false: hedge only the delta of options + perp, leaving the coin balance's own
     // USD exposure alone. true: run the whole account USD-neutral, collateral included.
     bool hedge_collateral = false;
+    // Spend the request budget on the most valuable quote updates first (true), or
+    // update instruments in a fixed order until the rate limit refuses (false).
+    bool allocate_requests = true;
 };
 
 MmConfig load_mm_config(const std::string& path);
@@ -56,6 +59,14 @@ struct MmStats {
     double edge_vol_qty = 0.0, edge_qty = 0.0;  // model edge at fill (vol pts x contracts)
     std::array<double, 3> mark_vol_qty{}, mark_coin{}, mark_qty{};
     std::map<std::string, std::uint64_t> rejects;
+
+    // Quote quality, sampled every requote cycle over every side we want to show.
+    std::uint64_t sides_wanted = 0, sides_showing = 0, sides_adverse = 0;
+    double off_target_vol = 0.0;   // summed over showing sides: |our price - wanted|, vol pts
+    std::uint64_t deferred = 0;    // actions left for a later cycle by the allocator
+    double quotes_up() const { return sides_wanted ? double(sides_showing) / sides_wanted : 0.0; }
+    double avg_off_target_vol() const { return sides_showing ? off_target_vol / sides_showing : 0.0; }
+    double adverse_share() const { return sides_showing ? double(sides_adverse) / sides_showing : 0.0; }
 };
 
 class MarketMaker {
@@ -93,6 +104,17 @@ private:
         std::uint32_t id;
         std::string name;
         std::uint64_t bid_order = 0, ask_order = 0;
+        double activity = 0.0;        // trades, exponentially decayed (half-life 5 min)
+        Clock::time_point activity_at{};
+    };
+    // One wanted change to a quote side, scored by how much it matters (USD).
+    struct Action {
+        std::size_t qi;
+        Side side;
+        std::optional<double> want;  // nullopt = cancel
+        double score;
+        const OptionQuote* q;
+        double T, theo_iv, vega_usd;
     };
     struct PendingMark {
         Clock::time_point due;
@@ -105,8 +127,8 @@ private:
     bool theo_for(const OptionQuote& q, double& T, double& iv) const;
     void refresh_risk();
     double hedgeable_delta() const;
-    void send(Quoted& s, Side side, std::optional<double> want, const OptionQuote& q, double T,
-              double theo_iv, double vega_per_contract);
+    bool execute(const Action& a);
+    double activity(const Quoted& s) const;
     void requote();
     void open_vega_same_dir(std::uint64_t self, bool self_live, double direction,
                             std::int64_t expiry_ms, double& total, double& in_expiry) const;

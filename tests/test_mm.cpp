@@ -493,3 +493,15 @@ TEST(RiskGate, CancelsSpendRateTokens) {
     EXPECT_EQ(g.check(opt_order(od::Side::Buy, 0.1), ok_ctx(), kT0), "rate_limit");  // ...so no new order
     EXPECT_FALSE(g.check(opt_order(od::Side::Buy, 0.1), ok_ctx(), kT0 + 100'000'000));  // 100 ms refills one
 }
+
+TEST(RiskGate, AvailableTokensForTheAllocator) {
+    od::RiskLimits lim;
+    lim.max_orders_per_sec = 4;
+    lim.burst = 3;
+    od::RiskGate g(lim);
+    EXPECT_EQ(g.available(kT0), 3);  // starts full
+    for (int i = 0; i < 3; ++i) EXPECT_FALSE(g.check(opt_order(od::Side::Buy, 0.1), ok_ctx(), kT0));
+    EXPECT_EQ(g.available(kT0), 0);
+    EXPECT_EQ(g.available(kT0 + 500'000'000), 2);  // 0.5 s at 4/s
+    EXPECT_EQ(g.available(kT0 + 5'000'000'000), 3);  // capped at the burst
+}
