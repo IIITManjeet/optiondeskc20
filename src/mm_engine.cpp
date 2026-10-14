@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -10,6 +11,41 @@
 #include "od/implied_vol.hpp"
 
 namespace od {
+
+double FlowPrior::rate(double days, double abs_k) const {
+    if (empty()) return 0.0;
+    auto bucket = [](const std::vector<double>& lower_edges, double x) {
+        std::size_t i = 0;
+        while (i + 1 < lower_edges.size() && x >= lower_edges[i + 1]) ++i;
+        return i;
+    };
+    const auto d = bucket(days_edges, days);
+    const auto k = bucket(moneyness_edges, abs_k);
+    return d < rate_per_min.size() && k < rate_per_min[d].size() ? rate_per_min[d][k] : 0.0;
+}
+
+FlowPrior load_flow_prior(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("cannot open flow prior " + path);
+    const auto j = nlohmann::json::parse(in);
+    // Files written by journal_stats.py list every edge, with null for the open end.
+    auto lower_edges = [](const nlohmann::json& e) {
+        std::vector<double> out;
+        for (const auto& x : e)
+            if (x.is_number()) out.push_back(x.get<double>());
+        return out;
+    };
+    FlowPrior p;
+    p.days_edges = lower_edges(j.at("days_edges"));
+    p.moneyness_edges = lower_edges(j.at("moneyness_edges"));
+    p.rate_per_min = j.at("rate_per_min").get<std::vector<std::vector<double>>>();
+    if (p.rate_per_min.size() != p.days_edges.size())
+        throw std::runtime_error(path + ": rate_per_min rows don't match days_edges");
+    for (const auto& row : p.rate_per_min)
+        if (row.size() != p.moneyness_edges.size())
+            throw std::runtime_error(path + ": rate_per_min columns don't match moneyness_edges");
+    return p;
+}
 
 MmConfig load_mm_config(const std::string& path) {
     std::ifstream in(path);
@@ -48,6 +84,14 @@ MmConfig load_mm_config(const std::string& path) {
         c.hedge_collateral = h->value("hedge_collateral", c.hedge_collateral);
     }
     c.allocate_requests = j.value("allocate_requests", c.allocate_requests);
+    if (const auto fp = j.find("flow_prior"); fp != j.end() && fp->is_string()) {
+        // Relative paths are relative to the config file.
+        std::filesystem::path p = fp->get<std::string>();
+        if (p.is_relative()) p = std::filesystem::path(path).parent_path() / p;
+        c.flow_prior = load_flow_prior(p.string());
+    }
+    c.prior_strength_min = j.value("prior_strength_min", c.prior_strength_min);
+    c.fill_rate_floor_per_min = j.value("fill_rate_floor_per_min", c.fill_rate_floor_per_min);
     return c;
 }
 
@@ -165,6 +209,16 @@ double MarketMaker::pnl_coin() const {
 
 // Carry out one planned action. Returns true if a request went to the gateway.
 bool MarketMaker::execute(const Action& a) {
+    const bool sent = execute_impl(a);
+    if (sent) {
+        ++stats_.requests;
+        if (static_cast<double>(a.q->expiry_ms - book_.last_exch_ts_ms()) < 2.0 * 86'400'000.0)
+            ++stats_.requests_short_dated;
+    }
+    return sent;
+}
+
+bool MarketMaker::execute_impl(const Action& a) {
     Quoted& s = quoted_[a.qi];
     const OptionQuote& q = *a.q;
     std::uint64_t& oid = a.side == Side::Buy ? s.bid_order : s.ask_order;
@@ -211,6 +265,18 @@ bool MarketMaker::execute(const Action& a) {
     return true;
 }
 
+// Expected public trades per minute in this option: the flow prior, worth
+// prior_strength_min minutes of observation, blended with the trades actually seen
+// (a decayed count whose effective window is half_life / ln 2 = ~7.2 minutes).
+double MarketMaker::expected_trades_per_min(const Quoted& s, const OptionQuote& q) const {
+    constexpr double kWindowMin = 5.0 / 0.6931471805599453;
+    const double days = static_cast<double>(q.expiry_ms - book_.last_exch_ts_ms()) / 86'400'000.0;
+    const double prior = cfg_.flow_prior.rate(days, std::abs(std::log(q.strike / q.underlying)));
+    const double m = cfg_.prior_strength_min;
+    const double rate = (prior * m + activity(s)) / (m + kWindowMin);
+    return std::max(rate, cfg_.fill_rate_floor_per_min);
+}
+
 double MarketMaker::activity(const Quoted& s) const {
     if (s.activity <= 0.0) return 0.0;
     const double dt = std::chrono::duration<double>(now_ - s.activity_at).count();
@@ -239,14 +305,16 @@ void MarketMaker::open_vega_same_dir(std::uint64_t self, bool self_live, double 
 // Plan every wanted change to our quotes, then spend the request budget on them.
 //
 // With a rate limit of a few requests per second we can't update every quote that
-// moves, so each action gets a score in USD and the budget goes to the highest:
+// moves, so each action gets a score (USD per minute) and the budget goes to the
+// highest:
 //   cancel : always first. A quote we don't want any more is pure risk.
 //   amend  : |resting price - wanted price| x size x index. An order that has become
 //            too generous (bid too high / offer too low: the side that gets picked
 //            off) counts 3x; one that is merely too passive is a missed opportunity.
 //   place  : the edge it would earn, |theo - wanted price| x size x index.
-// Each score is weighted by recent trade activity in the instrument (1 + decayed
-// trade count), so the budget goes where the flow is.
+// Each is multiplied by the expected trades per minute in the option (flow prior
+// blended with observed trades), so a quote is valued by what it can actually earn
+// or lose per minute: big edge on an option that never trades is worth little.
 void MarketMaker::requote() {
     constexpr double kCancel = 1e12;
     const double index = view_->index();
@@ -261,7 +329,7 @@ void MarketMaker::requote() {
         const QuoteInputs in{q->type, q->strike, q->underlying, T, theo_iv, q->bid, q->ask,
                              om_.position(s.name), risk_.vega_usd};
         const auto quote = make_quote(in, cfg_.quote);
-        const double weight = 1.0 + activity(s);
+        const double fills_per_min = expected_trades_per_min(s, *q);
 
         for (const Side side : {Side::Buy, Side::Sell}) {
             const auto want = side == Side::Buy ? quote.bid : quote.ask;
@@ -291,7 +359,7 @@ void MarketMaker::requote() {
             } else {
                 score = std::abs(quote.theo_coin - *want) * cfg_.quote.size * index;
             }
-            plan.push_back({i, side, want, score * weight, q, T, theo_iv, g.vega});
+            plan.push_back({i, side, want, score * fills_per_min, q, T, theo_iv, g.vega});
         }
     }
 

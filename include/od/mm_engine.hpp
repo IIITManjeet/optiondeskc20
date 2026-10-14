@@ -26,6 +26,18 @@
 
 namespace od {
 
+// How often options trade, by days to expiry x |ln(K/F)|: trades per minute per
+// option, from tools/journal_stats.py --profile. Buckets are [edge_i, edge_i+1);
+// the last bucket on each axis is open-ended.
+struct FlowPrior {
+    std::vector<double> days_edges, moneyness_edges;  // lower edges
+    std::vector<std::vector<double>> rate_per_min;    // [days bucket][moneyness bucket]
+    bool empty() const { return rate_per_min.empty(); }
+    double rate(double days, double abs_log_moneyness) const;
+};
+
+FlowPrior load_flow_prior(const std::string& path);
+
 struct MmConfig {
     // Which expiries to quote: by label, or (if the list is empty) every expiry
     // between min_days and max_days away, so a config doesn't go stale.
@@ -45,6 +57,13 @@ struct MmConfig {
     // Spend the request budget on the most valuable quote updates first (true), or
     // update instruments in a fixed order until the rate limit refuses (false).
     bool allocate_requests = true;
+    // The allocator scores a quote by expected profit per minute: edge x expected
+    // fills per minute. Expected fills blend the flow prior (worth prior_strength_min
+    // minutes of observation) with trades seen in the instrument, never below
+    // fill_rate_floor_per_min so instruments with no history still get some budget.
+    FlowPrior flow_prior;
+    double prior_strength_min = 10.0;
+    double fill_rate_floor_per_min = 0.005;
 };
 
 MmConfig load_mm_config(const std::string& path);
@@ -64,6 +83,10 @@ struct MmStats {
     std::uint64_t sides_wanted = 0, sides_showing = 0, sides_adverse = 0;
     double off_target_vol = 0.0;   // summed over showing sides: |our price - wanted|, vol pts
     std::uint64_t deferred = 0;    // actions left for a later cycle by the allocator
+    // Where the request budget went: requests for options under 2 days to expiry
+    // (where most of the flow is), out of all quote requests sent.
+    std::uint64_t requests = 0, requests_short_dated = 0;
+    double short_dated_share() const { return requests ? double(requests_short_dated) / requests : 0.0; }
     double quotes_up() const { return sides_wanted ? double(sides_showing) / sides_wanted : 0.0; }
     double avg_off_target_vol() const { return sides_showing ? off_target_vol / sides_showing : 0.0; }
     double adverse_share() const { return sides_showing ? double(sides_adverse) / sides_showing : 0.0; }
@@ -128,7 +151,9 @@ private:
     void refresh_risk();
     double hedgeable_delta() const;
     bool execute(const Action& a);
+    bool execute_impl(const Action& a);
     double activity(const Quoted& s) const;
+    double expected_trades_per_min(const Quoted& s, const OptionQuote& q) const;
     void requote();
     void open_vega_same_dir(std::uint64_t self, bool self_live, double direction,
                             std::int64_t expiry_ms, double& total, double& in_expiry) const;

@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <vector>
 
@@ -148,4 +150,38 @@ TEST(MmEngine, PerExpiryVegaLimitBoundsTheBook) {
     EXPECT_GT(limited.fills, 0u);
     EXPECT_LE(limited.max_abs_expiry_vega, 150.0 * 1.05);  // 5%: theo vs fitted-smile vega
     EXPECT_LT(limited.volume, free_run.volume);
+}
+
+// --- Flow prior -----------------------------------------------------------------
+
+TEST(FlowPrior, BucketLookupIncludingOpenEnds) {
+    od::FlowPrior p;
+    p.days_edges = {0, 1, 2};          // [0,1) [1,2) [2,inf)
+    p.moneyness_edges = {0, 0.02};     // [0,0.02) [0.02,inf)
+    p.rate_per_min = {{0.15, 0.003}, {0.14, 0.002}, {0.01, 0.001}};
+    EXPECT_DOUBLE_EQ(p.rate(0.5, 0.01), 0.15);
+    EXPECT_DOUBLE_EQ(p.rate(1.0, 0.01), 0.14);   // lower edge belongs to the bucket
+    EXPECT_DOUBLE_EQ(p.rate(1.5, 0.05), 0.002);
+    EXPECT_DOUBLE_EQ(p.rate(400, 0.9), 0.001);   // open-ended last buckets
+    EXPECT_DOUBLE_EQ(od::FlowPrior{}.rate(1, 0.01), 0.0);  // no prior: zero
+}
+
+TEST(FlowPrior, LoadsTheFileJournalStatsWrites) {
+    const auto path = (std::filesystem::temp_directory_path() / "od_flow_prior_test.json").string();
+    {
+        std::ofstream f(path);
+        f << R"({"days_edges": [0, 1, null], "moneyness_edges": [0, 0.02, null],
+                 "rate_per_min": [[0.15, 0.003], [0.01, 0.001]]})";
+    }
+    const auto p = od::load_flow_prior(path);
+    EXPECT_EQ(p.days_edges.size(), 2u);
+    EXPECT_DOUBLE_EQ(p.rate(0.2, 0.0), 0.15);
+    EXPECT_DOUBLE_EQ(p.rate(3.0, 0.5), 0.001);
+
+    {
+        std::ofstream f(path);  // rows don't match the edges
+        f << R"({"days_edges": [0, 1, null], "moneyness_edges": [0, null], "rate_per_min": [[0.1]]})";
+    }
+    EXPECT_THROW(od::load_flow_prior(path), std::runtime_error);
+    std::filesystem::remove(path);
 }

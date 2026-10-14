@@ -122,15 +122,16 @@ int main(int argc, char** argv) {
         }
         std::printf("\ntrades = public trades in quoted instruments; at_px = at one of our resting prices\n");
 
-        std::printf("\n%-18s %10s %16s %14s %10s\n", "quote quality", "quotes up", "off target (vol)",
-                    "too generous", "deferred");
+        std::printf("\n%-18s %10s %16s %14s %10s %10s %16s\n", "quote quality", "quotes up",
+                    "off target (vol)", "too generous", "deferred", "requests", "to <2-day opts");
         for (const auto& r : results) {
             const auto& s = r.stats;
             const auto slash = r.config.find_last_of('/');
             const std::string name = slash == std::string::npos ? r.config : r.config.substr(slash + 1);
-            std::printf("%-18s %9.1f%% %16.2f %13.1f%% %10llu\n", name.c_str(), 100 * s.quotes_up(),
-                        s.avg_off_target_vol(), 100 * s.adverse_share(),
-                        static_cast<unsigned long long>(s.deferred));
+            std::printf("%-18s %9.1f%% %16.2f %13.1f%% %10llu %10llu %15.1f%%\n", name.c_str(),
+                        100 * s.quotes_up(), s.avg_off_target_vol(), 100 * s.adverse_share(),
+                        static_cast<unsigned long long>(s.deferred),
+                        static_cast<unsigned long long>(s.requests), 100 * s.short_dated_share());
         }
         std::printf("\nsampled every requote over every side we want to show: share with a quote up, average\n"
                     "distance of the resting price from the wanted one, share resting on the generous side\n");
