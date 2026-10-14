@@ -79,8 +79,14 @@ Next: more data before trusting any parameter (hours of recordings across sessio
   rate limit; quote-quality metrics in status and replay.
 
 Mass quotes and MMP need exchange approval (the account returns
-`mass_quotes_disabled` / `MMP disabled`). Next: a flow prior by expiry and moneyness
-for the allocator; mass quotes if the account is enabled.
+`mass_quotes_disabled` / `MMP disabled`).
+- Quotes scored by expected profit per minute (edge x expected trades per minute),
+  with a flow prior by expiry x moneyness from `journal_stats.py --profile`. Out of
+  sample the prior steered the budget as designed, but the flow itself moved between
+  days, so a single-session prior isn't reliable.
+
+Next: priors averaged over many sessions, faster adaptation to current flow, and
+hours of recordings to judge P&L; mass quotes if the account is enabled.
 
 ## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
 - `od_record` journals both bus topics to a binary, append-only file; the reader

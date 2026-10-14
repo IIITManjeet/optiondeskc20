@@ -429,6 +429,44 @@ weight should correct for that, but with ~65 trades in the quoted options over 1
 minutes it barely moves. A flow prior by expiry and moneyness (from `journal_stats.py`)
 is the next refinement; fills this few can't separate the two approaches on P&L.
 
+### Flow prior, and an out-of-sample test
+
+Weighting edge by (1 + trades) couldn't overcome the edge gap between cheap
+short-dated options and expensive long-dated ones, so the allocator now scores a
+quote by **expected profit per minute: edge × expected trades per minute** in that
+option. Expected trades blend a flow prior (trades per minute per option, by days to
+expiry × |ln K/F|, worth `prior_strength_min` minutes of observation) with the trades
+actually seen, with a small floor so options without history still get budget.
+
+```bash
+python3 tools/journal_stats.py ~/btc.odj --profile data/flow/btc_2026-10-09.json
+# then in the config: "flow_prior": "../data/flow/btc_2026-10-09.json"
+```
+
+The prior in `data/flow/` was built from the 18.7-minute Oct 9 recording, where
+near-the-money options under 2 days traded ~0.14–0.15 times a minute each, 30–50×
+more than most other buckets. It was then tested on a **30-minute recording from
+Oct 14 that it had never seen**:
+
+| 2 requests/s | quotes up | share of requests to options < 2 days | fills |
+|---|---|---|---|
+| fixed order | 25.0% | 83.1% | 3 |
+| allocator | 52.6% | 21.3% | 0 |
+| allocator + Oct 9 prior | 52.1% | 44.6% | 0 |
+
+The prior moved the budget exactly as designed, and the quote-quality gain held. But
+**the flow had moved**: on Oct 14 the busiest expiry was 30OCT26, 16 days out (35 of
+65 trades, 153 contracts), and the dailies had 10 trades, against 77 of 135 on Oct 9.
+So the prior pushed budget toward where trades *had* been. The fixed order's 3 fills
+were all buys at the 0.0001 minimum price, worth essentially nothing, so no approach
+earned anything that could be compared.
+
+What this shows: the mechanism works out of sample, but **a prior from one short
+session is not reliable, because where options flow concentrates changes from day to
+day.** The next steps are a prior averaged over many sessions and faster adaptation
+to what is trading now (a shorter `prior_strength_min`). Judging any of this on P&L
+needs hours of recordings, not minutes.
+
 ## What's in here
 
 | File | What it does |
