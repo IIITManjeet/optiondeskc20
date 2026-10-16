@@ -5,11 +5,15 @@ and which side initiates them? Used to decide what a market maker should quote.
 
     python3 tools/journal_stats.py ~/btc_session.odj
     python3 tools/journal_stats.py ~/btc_session.odj --profile flow_prior.json
+    python3 tools/journal_stats.py ~/rec/*.odj --profile flow_prior.json
 
 --profile writes a flow prior for the market maker's request allocator: trades
 per minute *per option*, in buckets of days to expiry x distance from the forward
 (|ln(K/F)|). Per option, because a bucket with many strikes isn't individually
-busier than one with few.
+busier than one with few. Given several journals, each bucket's rate is pooled:
+all its trades over all its option-minutes, so longer sessions count for more.
+--shrink N pulls each bucket toward the average rate with N option-minutes of
+pseudo-observations; out of sample, ~1000 beat the raw rates (README).
 
 Reads the binary layout from include/od/journal.hpp and market_data.hpp directly
 (standard library only).
@@ -42,7 +46,7 @@ def bucket(edges, x):
     return len(edges) - 2
 
 
-def main(path: str, profile_out: str | None) -> None:
+def summarise(path: str, verbose: bool = True):
     data = open(path, "rb").read()
     magic, version, n_inst, ccy, start_ms = FILE_HEADER.unpack_from(data, 0)
     if magic != b"ODJRNL01":
@@ -82,11 +86,13 @@ def main(path: str, profile_out: str | None) -> None:
         off += size
 
     minutes = (last - first) / 60e9 if first is not None else 0.0
+    if not verbose:
+        return minutes, first_exch_ms, expiries, strikes, forward, trades
     currency = ccy.split(b"\0", 1)[0].decode()
     print(f"{path}: {currency}, {n_inst} instruments, "
           f"{minutes:.1f} min, {n_tick} tickers, {len(trades)} trades")
     if not trades:
-        return
+        return minutes, first_exch_ms, expiries, strikes, forward, trades
 
     label = lambda i: names[i].split("-")[1]
     by_expiry = Counter(label(i) for i, *_ in trades)
@@ -114,36 +120,69 @@ def main(path: str, profile_out: str | None) -> None:
           f"90th pct {amounts[int(len(amounts) * 0.9)]:.1f}, max {amounts[-1]:.1f} contracts")
     print(f"aggressor: {taker_buy} buys / {len(trades) - taker_buy} sells; "
           f"{otm} of {sum(buckets.values())} in OTM options")
+    return minutes, first_exch_ms, expiries, strikes, forward, trades
 
 
-    if profile_out:
-        write_profile(profile_out, path, minutes, first_exch_ms, expiries, strikes, forward, trades)
+def bucket_counts(minutes, first_ms, expiries, strikes, forward, trades):
+    """Option-minutes and trades per (days, moneyness) bucket for one journal.
 
-
-def write_profile(out, path, minutes, now_ms, expiries, strikes, forward, trades):
+    Days to expiry is taken at the middle of the recording for both, so an option
+    near a bucket edge puts its trades and its exposure in the same bucket.
+    """
     nd, nk = len(DAYS_EDGES) - 1, len(MONEYNESS_EDGES) - 1
-    options = [[0] * nk for _ in range(nd)]
-    for i, fwd in forward.items():  # options that were live and priced during the recording
-        days = (expiries[i] - now_ms) / 86_400_000
-        if days <= 0:
-            continue
-        options[bucket(DAYS_EDGES, days)][bucket(MONEYNESS_EDGES, abs(math.log(strikes[i] / fwd)))] += 1
+    exposure = [[0.0] * nk for _ in range(nd)]
     counts = [[0] * nk for _ in range(nd)]
-    for i, _, _, _, fwd, exch_ms in trades:
+    if not first_ms:
+        return exposure, counts
+    mid_ms = first_ms + minutes * 30_000
+    days = lambda i: (expiries[i] - mid_ms) / 86_400_000
+    for i, fwd in forward.items():  # options that were live and priced during the recording
+        if days(i) <= 0:
+            continue
+        exposure[bucket(DAYS_EDGES, days(i))][bucket(MONEYNESS_EDGES, abs(math.log(strikes[i] / fwd)))] += minutes
+    for i, _, _, _, fwd, _ in trades:
         if not fwd:
             continue
-        days = (expiries[i] - exch_ms) / 86_400_000
-        counts[bucket(DAYS_EDGES, max(days, 0))][bucket(MONEYNESS_EDGES, abs(math.log(strikes[i] / fwd)))] += 1
-    rate = [[counts[d][k] / (minutes * options[d][k]) if options[d][k] and minutes > 0 else 0.0
+        counts[bucket(DAYS_EDGES, max(days(i), 0))][bucket(MONEYNESS_EDGES, abs(math.log(strikes[i] / fwd)))] += 1
+    return exposure, counts
+
+
+def pooled_rate(stats, shrink=0.0):
+    """Trades per minute per option by bucket, pooled over journals (summarise() tuples).
+
+    shrink adds that many option-minutes to every bucket at the pooled average rate,
+    pulling thinly observed buckets toward the average. A raw single-session rate is
+    overconfident: a bucket that happened not to trade gets ~0 and one lucky bucket
+    gets a large multiple, and flow moves between days (see prior_walk_forward.py).
+    """
+    nd, nk = len(DAYS_EDGES) - 1, len(MONEYNESS_EDGES) - 1
+    exposure = [[0.0] * nk for _ in range(nd)]
+    counts = [[0] * nk for _ in range(nd)]
+    for s in stats:
+        e, c = bucket_counts(*s)
+        for d in range(nd):
+            for k in range(nk):
+                exposure[d][k] += e[d][k]
+                counts[d][k] += c[d][k]
+    total = sum(map(sum, exposure))
+    avg = sum(map(sum, counts)) / total if total > 0 else 0.0
+    rate = [[(counts[d][k] + shrink * avg) / (exposure[d][k] + shrink) if exposure[d][k] + shrink > 0 else 0.0
              for k in range(nk)] for d in range(nd)]
+    return rate, exposure, counts
+
+
+def write_profile(out, sessions, shrink=0.0):
+    nd, nk = len(DAYS_EDGES) - 1, len(MONEYNESS_EDGES) - 1
+    rate, exposure, counts = pooled_rate([s[1:] for s in sessions], shrink)
     json.dump({
-        "source": path,
-        "minutes": round(minutes, 2),
-        "trades": len(trades),
+        "source": [path for path, *_ in sessions],
+        "minutes": round(sum(m for _, m, *_ in sessions), 2),
+        "trades": sum(len(s[-1]) for s in sessions),
         "days_edges": DAYS_EDGES[:-1] + [None],
         "moneyness_edges": MONEYNESS_EDGES[:-1] + [None],
-        "options": options,
+        "option_minutes": [[round(x, 1) for x in row] for row in exposure],
         "trades_by_bucket": counts,
+        "shrink_option_minutes": shrink,
         "rate_per_min": rate,
     }, open(out, "w"), indent=1)
     print(f"\nflow prior written to {out} (trades per minute per option):")
@@ -156,7 +195,15 @@ def write_profile(out, path, minutes, now_ms, expiries, strikes, forward, trades
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("journal")
+    ap.add_argument("journal", nargs="+")
     ap.add_argument("--profile", help="write a flow prior JSON for the market maker")
+    ap.add_argument("--shrink", type=float, default=0.0,
+                    help="option-minutes at the average rate added to every bucket (e.g. 1000)")
     args = ap.parse_args()
-    main(args.journal, args.profile)
+    sessions = []
+    for i, path in enumerate(args.journal):
+        if i:
+            print()
+        sessions.append((path, *summarise(path)))
+    if args.profile:
+        write_profile(args.profile, sessions, args.shrink)

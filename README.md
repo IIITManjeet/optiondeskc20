@@ -467,6 +467,44 @@ day.** The next steps are a prior averaged over many sessions and faster adaptat
 to what is trading now (a shorter `prior_strength_min`). Judging any of this on P&L
 needs hours of recordings, not minutes.
 
+### Scoring priors out of sample
+
+To test a prior without P&L, `tools/prior_eval.py` and `tools/prior_walk_forward.py`
+score how well it predicts where trades land in a journal it wasn't built from: the
+Poisson log-likelihood of each live option's trade count, in **bits per trade against
+a flat rate** taken from the test journal itself. Positive means the prior knows where
+trades go better than "every option is equally likely".
+
+```bash
+python3 tools/prior_walk_forward.py ~/btc_session.odj ~/btc_oct14.odj ~/rec/btc_2026-10-15_1814.odj     --shrink 0 300 1000 3000 --shape
+python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-15.json --shrink 1000
+```
+
+Over three sessions (Oct 9: 19 min, Oct 14: 30 min, Oct 15: 60 min; 220 test trades),
+each prior built only from earlier sessions:
+
+| prior (trade-weighted bits/trade vs flat) | raw | shrink 300 | shrink 1000 | shrink 3000 |
+|---|---|---|---|---|
+| last session | −1.41 | −0.18 | +0.06 | +0.02 |
+| all earlier sessions pooled | −1.88 | −0.38 | −0.02 | +0.03 |
+| last session, shape only | −0.99 | +0.15 | **+0.35** | +0.31 |
+| pooled, shape only | −1.44 | −0.08 | +0.21 | +0.28 |
+| committed Oct 9 prior (raw) | −3.76 | | | |
+
+Two things go wrong with a raw prior. It is **overconfident**: a bucket that didn't
+trade in a short session gets a rate near zero, and when it then trades the miss is
+expensive. And the **level moves**: Oct 9 traded 0.0071 times a minute per option,
+Oct 14 0.0024. `--shrink N` fixes the first by adding N option-minutes at the average
+rate to every bucket; `--shape` sets aside the second by rescaling each prior to the
+test day's total. That's what matters to the allocator, which only ranks options
+against each other. Shrunk by ~1000 option-minutes, the prior's shape beats flat on
+both test days (+0.44 and +0.31 bits/trade).
+
+Pooling everything wasn't better than the most recent session: Oct 9's daily-heavy flow
+diluted the Oct 15 prediction. Recent sessions matter more than old ones. With three
+sessions that is a hint, not a result. `data/flow/btc_pooled_2026-10-15.json` is
+all three pooled, shrunk by 1000.
+
 ## What's in here
 
 | File | What it does |
@@ -497,7 +535,9 @@ needs hours of recordings, not minutes.
 | `src/journal.cpp` | Binary market-data journal (writer and mmap reader) |
 | `apps/od_record.cpp` | Records the feed buses to a journal |
 | `apps/od_replay.cpp` | Deterministic replay of the engine over a journal |
-| `tools/journal_stats.py` | Where trades happen in a journal (expiry, moneyness, size) |
+| `tools/journal_stats.py` | Where trades happen in a journal (expiry, moneyness, size); builds flow priors |
+| `tools/prior_eval.py` | Scores flow priors on journals they weren't built from |
+| `tools/prior_walk_forward.py` | Walk-forward test of flow priors over consecutive journals |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
 | `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |

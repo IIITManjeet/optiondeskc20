@@ -84,9 +84,13 @@ Mass quotes and MMP need exchange approval (the account returns
   with a flow prior by expiry x moneyness from `journal_stats.py --profile`. Out of
   sample the prior steered the budget as designed, but the flow itself moved between
   days, so a single-session prior isn't reliable.
+- Priors pooled over sessions and shrunk toward the average rate; scored out of sample
+  in bits/trade vs flat (`prior_eval.py`, `prior_walk_forward.py`). Raw priors lose to
+  flat; shrunk by ~1000 option-minutes, their shape beats it on both test days.
 
-Next: priors averaged over many sessions, faster adaptation to current flow, and
-hours of recordings to judge P&L; mass quotes if the account is enabled.
+Next: more sessions to settle the shrinkage and whether to weight recent sessions,
+faster adaptation to current flow,
+and hours of recordings to judge P&L; mass quotes if the account is enabled.
 
 ## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
 - `od_record` journals both bus topics to a binary, append-only file; the reader
