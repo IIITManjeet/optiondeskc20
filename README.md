@@ -476,34 +476,51 @@ a flat rate** taken from the test journal itself. Positive means the prior knows
 trades go better than "every option is equally likely".
 
 ```bash
-python3 tools/prior_walk_forward.py ~/btc_session.odj ~/btc_oct14.odj ~/rec/btc_2026-10-15_1814.odj     --shrink 0 300 1000 3000 --shape
-python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-15.json --shrink 1000
+python3 tools/prior_walk_forward.py ~/btc_session.odj ~/btc_oct14.odj ~/rec/btc_*.odj     --shrink 0 300 1000 3000 --shape
+python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-17.json --shrink 1000
 ```
 
-Over three sessions (Oct 9: 19 min, Oct 14: 30 min, Oct 15: 60 min; 220 test trades),
-each prior built only from earlier sessions:
+Five sessions: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), and two consecutive
+chunks on Oct 17 (60 and 31 min). Each prior is built only from sessions before the
+one it's tested on, giving 765 test trades:
 
 | prior (trade-weighted bits/trade vs flat) | raw | shrink 300 | shrink 1000 | shrink 3000 |
 |---|---|---|---|---|
-| last session | −1.41 | −0.18 | +0.06 | +0.02 |
-| all earlier sessions pooled | −1.88 | −0.38 | −0.02 | +0.03 |
-| last session, shape only | −0.99 | +0.15 | **+0.35** | +0.31 |
-| pooled, shape only | −1.44 | −0.08 | +0.21 | +0.28 |
-| committed Oct 9 prior (raw) | −3.76 | | | |
+| last session | −0.23 | | +0.31 | |
+| all earlier sessions pooled | +0.01 | | **+0.59** | |
+| last session, shape only | +0.13 | +0.62 | +0.69 | +0.57 |
+| pooled, shape only | +0.29 | +0.77 | **+0.87** | +0.81 |
 
 Two things go wrong with a raw prior. It is **overconfident**: a bucket that didn't
 trade in a short session gets a rate near zero, and when it then trades the miss is
 expensive. And the **level moves**: Oct 9 traded 0.0071 times a minute per option,
 Oct 14 0.0024. `--shrink N` fixes the first by adding N option-minutes at the average
 rate to every bucket; `--shape` sets aside the second by rescaling each prior to the
-test day's total. That's what matters to the allocator, which only ranks options
-against each other. Shrunk by ~1000 option-minutes, the prior's shape beats flat on
-both test days (+0.44 and +0.31 bits/trade).
+test session's total. Shape is what matters to the allocator, which only ranks options
+against each other. Pooled over all earlier sessions and shrunk by ~1000
+option-minutes, the prior is the best on both measures.
 
-Pooling everything wasn't better than the most recent session: Oct 9's daily-heavy flow
-diluted the Oct 15 prediction. Recent sessions matter more than old ones. With three
-sessions that is a hint, not a result. `data/flow/btc_pooled_2026-10-15.json` is
-all three pooled, shrunk by 1000.
+Per session, the test gets easier as history grows. With three sessions, the most
+recent session alone beat the pool (Oct 9's daily-heavy flow diluted the Oct 15
+prediction). From four on, pooling wins: +0.90 bits/trade on the Oct 17 hour (shape
+only). Consecutive hours are very alike: the hour before predicted the next
+half-hour at +1.97 bits/trade with no shrinkage at all. That argues for a recent-flow
+term on top of a pooled prior, which is what the engine's blend of prior and observed
+trades already is (`prior_strength_min`). `data/flow/btc_pooled_2026-10-17.json` is
+all five sessions pooled, shrunk by 1000.
+
+Replaying the Oct 15 hour at 2 requests/s with a prior from Oct 9 + 14 only (shrunk by
+1000) put the request budget between no prior and the raw Oct 9 prior, as intended:
+
+| 2 requests/s, Oct 15 | quotes up | too generous | requests to options < 2 days | fills |
+|---|---|---|---|---|
+| fixed order | 67.2% | 8.1% | 79.1% | 11 |
+| allocator | 91.0% | 2.8% | 42.2% | 4 |
+| allocator + raw Oct 9 prior | 85.0% | 4.1% | 64.6% | 2 |
+| allocator + shrunk Oct 9 + 14 prior | 89.2% | 3.3% | 54.7% | 4 |
+
+Fills are still too few to compare on P&L, so the bits-per-trade score is the measure
+to use for priors for now.
 
 ## What's in here
 
