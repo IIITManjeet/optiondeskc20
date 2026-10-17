@@ -4,6 +4,8 @@
   "otm_only": true,
   "coin_balance": 2.0,
   "requote_ms": 250,
+  "flow_prior": "../data/flow/btc_pooled_2026-10-17.json",
+  "prior_strength_min": 10,
   "min_requote_ticks": 1,
   "quote": {
     "half_spread_vol": 0.015,

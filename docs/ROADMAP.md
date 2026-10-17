@@ -89,9 +89,12 @@ Mass quotes and MMP need exchange approval (the account returns
   flat; pooled over five sessions and shrunk by ~1000 option-minutes, they beat it
   (+0.59 bits/trade, +0.87 on shape alone).
 
-Next: tune `prior_strength_min` against the walk-forward (consecutive hours are very
-alike), more sessions, and hours of recordings to judge P&L; mass quotes if the
-account is enabled.
+- `prior_strength_min` tuned walk-forward (`prior_strength.py`): the default 10
+  minutes is best, +1.56 bits/trade vs +0.58 for the prior alone. The example config
+  uses the five-session pooled prior.
+
+Next: more sessions to keep the prior current, and hours of recordings to judge
+P&L; mass quotes if the account is enabled.
 
 ## M6: Record, replay, backtest ✅ (ahead of M5: it doesn't need exchange keys)
 - `od_record` journals both bus topics to a binary, append-only file; the reader

@@ -440,7 +440,7 @@ actually seen, with a small floor so options without history still get budget.
 
 ```bash
 python3 tools/journal_stats.py ~/btc.odj --profile data/flow/btc_2026-10-09.json
-# then in the config: "flow_prior": "../data/flow/btc_2026-10-09.json"
+# then in the config: "flow_prior": "../data/flow/btc_pooled_2026-10-17.json"
 ```
 
 The prior in `data/flow/` was built from the 18.7-minute Oct 9 recording, where
@@ -522,6 +522,25 @@ Replaying the Oct 15 hour at 2 requests/s with a prior from Oct 9 + 14 only (shr
 Fills are still too few to compare on P&L, so the bits-per-trade score is the measure
 to use for priors for now.
 
+### How much to trust the prior: `prior_strength_min`
+
+The engine expects an option to trade at (prior × m + activity) / (m + 7.2) per
+minute, where activity is the option's trades so far, decayed with a 5-minute
+half-life, and m is `prior_strength_min`. `tools/prior_strength.py` replays that
+forecast minute by minute over each session, using a prior pooled only from earlier
+sessions, and scores it on the next minute's trades:
+
+| m (minutes) | 0 (now only) | 1 | 3 | **10** | 30 | 100 | 300 | prior only |
+|---|---|---|---|---|---|---|---|---|
+| bits/trade vs flat (740 trades) | −0.71 | +0.74 | +1.30 | **+1.56** | +1.47 | +1.19 | +0.96 | +0.58 |
+| shape only | −0.69 | +0.77 | +1.34 | **+1.68** | +1.67 | +1.46 | +1.25 | +0.88 |
+
+The default of 10 is the best setting. Every test session peaks at 10–30, and it is
+still best with the engine's 0.005 floor. Blending the two nearly triples the score of
+the prior alone. Recent trades alone are worse than flat, because one trade in a quiet
+option says little. The prior alone misses the drift within a session. The example
+config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.
+
 ## What's in here
 
 | File | What it does |
@@ -555,6 +574,7 @@ to use for priors for now.
 | `tools/journal_stats.py` | Where trades happen in a journal (expiry, moneyness, size); builds flow priors |
 | `tools/prior_eval.py` | Scores flow priors on journals they weren't built from |
 | `tools/prior_walk_forward.py` | Walk-forward test of flow priors over consecutive journals |
+| `tools/prior_strength.py` | Tunes how the engine weighs the flow prior against recent trades |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
 | `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |
