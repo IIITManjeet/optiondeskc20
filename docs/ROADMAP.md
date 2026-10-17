@@ -86,12 +86,12 @@ Mass quotes and MMP need exchange approval (the account returns
   days, so a single-session prior isn't reliable.
 - Priors pooled over sessions and shrunk toward the average rate; scored out of sample
   in bits/trade vs flat (`prior_eval.py`, `prior_walk_forward.py`). Raw priors lose to
-  flat; pooled over six sessions and shrunk by ~1000 option-minutes, they beat it
-  (+0.54 bits/trade, +0.79 on shape alone).
+  flat; pooled over eight sessions and shrunk by ~1000 option-minutes, they beat it
+  (+0.48 bits/trade, +0.76 on shape alone). Weighting recent sessions more didn't help.
 
 - `prior_strength_min` tuned walk-forward (`prior_strength.py`): the default 10
-  minutes is best, +1.53 bits/trade vs +0.53 for the prior alone. The example config
-  uses the six-session pooled prior.
+  minutes is best, +1.37 bits/trade vs +0.47 for the prior alone. The example config
+  uses the eight-session pooled prior.
 
 Next: more sessions to keep the prior current, and hours of recordings to judge
 P&L; mass quotes if the account is enabled.

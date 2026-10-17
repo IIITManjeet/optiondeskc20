@@ -488,16 +488,17 @@ python3 tools/prior_walk_forward.py ~/btc_session.odj ~/btc_oct14.odj ~/rec/btc_
 python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-17.json --shrink 1000
 ```
 
-Six sessions: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), two consecutive
-chunks early on Oct 17 (60 and 31 min), and 36 min on the evening of Oct 17. Each prior
-is built only from sessions before the one it's tested on, giving 865 test trades:
+Eight sessions: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), two consecutive
+chunks early on Oct 17 (60 and 31 min), and three recorded unattended on the evening of
+Oct 17 (60, 60 and 43 min). Each prior is built only from sessions before the one it's
+tested on, giving 1112 test trades:
 
 | prior (trade-weighted bits/trade vs flat) | raw | shrink 300 | shrink 1000 | shrink 3000 |
 |---|---|---|---|---|
-| last session | −0.41 | +0.22 | +0.30 | +0.18 |
-| all earlier sessions pooled | −0.01 | +0.45 | **+0.54** | +0.48 |
-| last session, shape only | −0.06 | +0.55 | +0.64 | +0.54 |
-| pooled, shape only | +0.26 | +0.69 | **+0.79** | +0.76 |
+| last session | −0.36 | +0.29 | +0.38 | +0.26 |
+| all earlier sessions pooled | +0.01 | +0.38 | **+0.48** | +0.46 |
+| last session, shape only | −0.06 | +0.56 | +0.66 | +0.55 |
+| pooled, shape only | +0.33 | +0.68 | **+0.76** | +0.75 |
 
 Two things go wrong with a raw prior. It is **overconfident**: a bucket that didn't
 trade in a short session gets a rate near zero, and when it then trades the miss is
@@ -514,11 +515,15 @@ prediction). From four on, pooling wins: +0.90 bits/trade on the Oct 17 hour (sh
 only). Consecutive hours are very alike: the hour before predicted the next
 half-hour at +1.97 bits/trade with no shrinkage at all. That argues for a recent-flow
 term on top of a pooled prior, which is what the engine's blend of prior and observed
-trades already is (`prior_strength_min`). The evening of Oct 17 was the hardest test
-after Oct 14. Flow had moved from the dailies to 30OCT26 and 20OCT26, and to strikes
-15–20% from the forward (26 of 100 trades). The previous half-hour alone scored −1.75
-raw; pooled and shrunk, the prior still beat flat (+0.14, or +0.32 shrunk by 3000).
-`data/flow/btc_pooled_2026-10-17.json` is all six sessions pooled (239 min, 1017
+trades already is (`prior_strength_min`). On the evening of Oct 17 the flow moved
+again: first to 30OCT26 and 20OCT26, with strikes 15–20% from the forward, then to
+6NOV26 (25 of 107 and 22 of 65 trades in the last two hours). In those last two hours
+the previous hour alone beat the pool (+0.46 and +0.99 vs +0.12 and +0.07, shrunk by
+1000). So I tried weighting sessions by age, with a half-life of 0.5 to 48 hours.
+Equal weights still scored best, on shape (+0.78 vs +0.31 to +0.75) and combined with
+the engine's blend (+1.43 vs +1.18 to +1.39). Discounting old sessions throws away too
+many trades, and the engine's blend with live trades already handles recency.
+`data/flow/btc_pooled_2026-10-17.json` is all eight sessions pooled (367 min, 1255
 trades), shrunk by 1000.
 
 Replaying the Oct 15 hour at 2 requests/s with a prior from Oct 9 + 14 only (shrunk by
@@ -544,8 +549,8 @@ sessions, and scores it on the next minute's trades:
 
 | m (minutes) | 0 (now only) | 1 | 3 | **10** | 30 | 100 | 300 | prior only |
 |---|---|---|---|---|---|---|---|---|
-| bits/trade vs flat (840 trades) | −0.75 | +0.72 | +1.28 | **+1.53** | +1.42 | +1.14 | +0.90 | +0.53 |
-| shape only | −0.75 | +0.72 | +1.29 | **+1.61** | +1.58 | +1.36 | +1.15 | +0.79 |
+| bits/trade vs flat (1087 trades) | −0.96 | +0.57 | +1.14 | **+1.37** | +1.26 | +0.99 | +0.78 | +0.47 |
+| shape only | −0.95 | +0.59 | +1.18 | **+1.48** | +1.46 | +1.26 | +1.07 | +0.77 |
 
 The default of 10 is the best setting. Every test session peaks at 10–30, and it is
 still best with the engine's 0.005 floor. Blending the two nearly triples the score of
