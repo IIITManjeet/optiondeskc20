@@ -279,6 +279,11 @@ disk; an hour is ~400 MB. The Python tools cache each journal's summary in
 ~400 MB, rerunning from the cache ~1.6 s and ~20 MB, so re-scoring every session
 as new ones arrive stays cheap.
 
+The machine sleeping will stop a recording. While a laptop sleeps, Deribit drops the
+WebSocket, but the client never hears about it, so the read used to block forever
+(the feed showed "connected" at 0 tickers/s for hours). The feed now drops any
+connection that has sent nothing for 3 heartbeat intervals (30 s) and reconnects.
+
 `od_record` journals both bus topics (binary, append-only, starting from the full
 last-value-cache state). `od_replay` runs the engine over the journal with the
 recorded timestamps as its clock and synchronous surface refits, so a replay is
@@ -490,15 +495,15 @@ python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026
 
 Eight sessions: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), two consecutive
 chunks early on Oct 17 (60 and 31 min), and three recorded unattended on the evening of
-Oct 17 (60, 60 and 43 min). Each prior is built only from sessions before the one it's
-tested on, giving 1112 test trades:
+Oct 17 (60 min each). Each prior is built only from sessions before the one it's tested
+on, giving 1120 test trades:
 
 | prior (trade-weighted bits/trade vs flat) | raw | shrink 300 | shrink 1000 | shrink 3000 |
 |---|---|---|---|---|
-| last session | −0.36 | +0.29 | +0.38 | +0.26 |
-| all earlier sessions pooled | +0.01 | +0.38 | **+0.48** | +0.46 |
-| last session, shape only | −0.06 | +0.56 | +0.66 | +0.55 |
-| pooled, shape only | +0.33 | +0.68 | **+0.76** | +0.75 |
+| last session | −0.38 | +0.28 | +0.37 | +0.26 |
+| all earlier sessions pooled | −0.04 | +0.33 | **+0.44** | +0.42 |
+| last session, shape only | −0.07 | +0.56 | +0.65 | +0.55 |
+| pooled, shape only | +0.33 | +0.67 | **+0.76** | +0.74 |
 
 Two things go wrong with a raw prior. It is **overconfident**: a bucket that didn't
 trade in a short session gets a rate near zero, and when it then trades the miss is
@@ -517,13 +522,13 @@ half-hour at +1.97 bits/trade with no shrinkage at all. That argues for a recent
 term on top of a pooled prior, which is what the engine's blend of prior and observed
 trades already is (`prior_strength_min`). On the evening of Oct 17 the flow moved
 again: first to 30OCT26 and 20OCT26, with strikes 15–20% from the forward, then to
-6NOV26 (25 of 107 and 22 of 65 trades in the last two hours). In those last two hours
-the previous hour alone beat the pool (+0.46 and +0.99 vs +0.12 and +0.07, shrunk by
+6NOV26 (25 of 107 and 22 of 73 trades in the last two hours). In those last two hours
+the previous hour alone beat the pool (+0.46 and +0.85 vs +0.12 and −0.51, shrunk by
 1000). So I tried weighting sessions by age, with a half-life of 0.5 to 48 hours.
-Equal weights still scored best, on shape (+0.78 vs +0.31 to +0.75) and combined with
-the engine's blend (+1.43 vs +1.18 to +1.39). Discounting old sessions throws away too
+Equal weights still scored best, on shape (+0.78 vs +0.31 to +0.74) and combined with
+the engine's blend (+1.41 vs +1.18 to +1.37). Discounting old sessions throws away too
 many trades, and the engine's blend with live trades already handles recency.
-`data/flow/btc_pooled_2026-10-17.json` is all eight sessions pooled (367 min, 1255
+`data/flow/btc_pooled_2026-10-17.json` is all eight sessions pooled (382 min, 1262
 trades), shrunk by 1000.
 
 Replaying the Oct 15 hour at 2 requests/s with a prior from Oct 9 + 14 only (shrunk by
@@ -549,8 +554,8 @@ sessions, and scores it on the next minute's trades:
 
 | m (minutes) | 0 (now only) | 1 | 3 | **10** | 30 | 100 | 300 | prior only |
 |---|---|---|---|---|---|---|---|---|
-| bits/trade vs flat (1087 trades) | −0.96 | +0.57 | +1.14 | **+1.37** | +1.26 | +0.99 | +0.78 | +0.47 |
-| shape only | −0.95 | +0.59 | +1.18 | **+1.48** | +1.46 | +1.26 | +1.07 | +0.77 |
+| bits/trade vs flat (1092 trades) | −0.95 | +0.58 | +1.14 | **+1.35** | +1.22 | +0.95 | +0.74 | +0.43 |
+| shape only | −0.93 | +0.60 | +1.18 | **+1.48** | +1.46 | +1.26 | +1.07 | +0.77 |
 
 The default of 10 is the best setting. Every test session peaks at 10–30, and it is
 still best with the engine's 0.005 floor. Blending the two nearly triples the score of

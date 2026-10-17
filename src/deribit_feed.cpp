@@ -105,6 +105,38 @@ void Feed::session(const std::atomic<bool>& stop) {
         ~FdReset() { fd = -1; }
     } fd_reset{fd_};
 
+    // A connection can die without either end closing it (the machine sleeps, a NAT
+    // forgets it) and then ws.read() blocks forever. The server heartbeat guarantees a
+    // frame at least every heartbeat_s, so 3x that in silence means the connection is
+    // gone: shut the socket down so the read fails and run() reconnects.
+    std::atomic<bool> session_done{false};
+    std::thread watchdog([&] {
+        const auto limit = std::chrono::seconds(3 * cfg_.heartbeat_s);
+        auto frames = counters_.frames.load(std::memory_order_relaxed);
+        auto last = std::chrono::steady_clock::now();
+        while (!session_done.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            const auto now = std::chrono::steady_clock::now();
+            if (const auto f = counters_.frames.load(std::memory_order_relaxed); f != frames) {
+                frames = f;
+                last = now;
+            } else if (now - last > limit) {
+                std::fprintf(stderr, "feed: no data for %ds, dropping the connection\n",
+                             3 * cfg_.heartbeat_s);
+                interrupt();
+                last = now;
+            }
+        }
+    });
+    struct WatchdogJoin {
+        std::atomic<bool>& done;
+        std::thread& t;
+        ~WatchdogJoin() {
+            done = true;
+            t.join();
+        }
+    } watchdog_join{session_done, watchdog};
+
     if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), host.c_str()))
         throw std::runtime_error("SNI setup failed");
     ws.next_layer().set_verify_callback(ssl::host_name_verification(host));
