@@ -22,6 +22,8 @@ Reads the binary layout from include/od/journal.hpp and market_data.hpp directly
 import argparse
 import json
 import math
+import mmap
+import os
 import struct
 import sys
 from collections import Counter, defaultdict
@@ -46,8 +48,39 @@ def bucket(edges, x):
     return len(edges) - 2
 
 
+def cached_summary(path: str):
+    """summarise(path, verbose=False), cached in PATH.stats.json.
+
+    The cache is keyed on the journal's size and mtime, so a journal still being
+    recorded is re-read each time and a finished one is parsed once. Parsing an
+    hour (~400 MB) takes ~20 s; loading the cache takes milliseconds.
+    """
+    st = os.stat(path)
+    key = [st.st_size, st.st_mtime_ns]
+    cache = path + ".stats.json"
+    try:
+        with open(cache) as f:
+            c = json.load(f)
+        if c["key"] == key:
+            return (c["minutes"], c["first_ms"], c["expiries"], c["strikes"],
+                    {int(i): v for i, v in c["forward"].items()}, [tuple(t) for t in c["trades"]])
+    except (OSError, ValueError, KeyError):
+        pass
+    minutes, first_ms, expiries, strikes, forward, trades = summarise(path, verbose=False)
+    try:
+        with open(cache, "w") as f:
+            json.dump({"key": key, "minutes": minutes, "first_ms": first_ms, "expiries": expiries,
+                       "strikes": strikes, "forward": forward, "trades": trades}, f)
+    except OSError:
+        pass  # read-only location: just don't cache
+    return minutes, first_ms, expiries, strikes, forward, trades
+
+
 def summarise(path: str, verbose: bool = True):
-    data = open(path, "rb").read()
+    # mmap rather than read(): the pages are file-backed, so a 400 MB journal doesn't
+    # need 400 MB of private memory.
+    with open(path, "rb") as f:
+        data = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
     magic, version, n_inst, ccy, start_ms = FILE_HEADER.unpack_from(data, 0)
     if magic != b"ODJRNL01":
         sys.exit(f"{path}: not a journal")

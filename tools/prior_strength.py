@@ -23,7 +23,7 @@ import math
 import os
 from collections import defaultdict
 
-from journal_stats import DAYS_EDGES, MONEYNESS_EDGES, bucket, pooled_rate, summarise
+from journal_stats import DAYS_EDGES, MONEYNESS_EDGES, bucket, pooled_rate, cached_summary
 
 WINDOW_MIN = 5.0 / math.log(2)
 STRENGTHS = [0, 1, 3, 10, 30, 100, 300, 1e9]
@@ -76,7 +76,7 @@ def main():
     if len(args.journal) < 2:
         raise SystemExit("need at least two journals")
 
-    stats = [summarise(p, verbose=False) for p in args.journal]
+    stats = [cached_summary(p) for p in args.journal]
     label = lambda m: "prior" if m >= 1e8 else f"m={m:g}"
     totals = defaultdict(float)
     total_trades = 0

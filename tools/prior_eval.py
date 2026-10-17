@@ -22,7 +22,7 @@ import json
 import math
 from collections import Counter
 
-from journal_stats import DAYS_EDGES, MONEYNESS_EDGES, bucket, summarise
+from journal_stats import DAYS_EDGES, MONEYNESS_EDGES, bucket, cached_summary
 
 
 def load_prior(path):
@@ -34,7 +34,7 @@ def load_prior(path):
 
 def option_counts(path):
     """[(expected-rate lookup key, minutes, trades)] for every live option."""
-    minutes, first_ms, expiries, strikes, forward, trades = summarise(path, verbose=False)
+    minutes, first_ms, expiries, strikes, forward, trades = cached_summary(path)
     if not first_ms or minutes <= 0:
         return minutes, []
     mid_ms = first_ms + minutes * 30_000

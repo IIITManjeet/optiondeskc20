@@ -22,7 +22,7 @@ import argparse
 import math
 import os
 
-from journal_stats import pooled_rate, summarise
+from journal_stats import pooled_rate, cached_summary
 from prior_eval import load_prior, loglik, option_counts
 
 
@@ -38,7 +38,7 @@ def main():
         raise SystemExit("need at least two journals")
 
     fixed = load_prior(args.prior) if args.prior else None
-    stats = [summarise(p, verbose=False) for p in args.journal]
+    stats = [cached_summary(p) for p in args.journal]
     tag = lambda a: f"/{a:g}" if len(args.shrink) > 1 or a else ""
     names = [f"{n}{tag(a)}" for n in ("last", "pooled") for a in args.shrink] + (["fixed"] if fixed else [])
     width = max(9, max(map(len, names)) + 2)

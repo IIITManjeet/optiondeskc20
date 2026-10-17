@@ -271,6 +271,14 @@ The second constraint is how little trades. In one 10-minute live window there w
 python3 tools/journal_stats.py ~/btc.odj                 # where did trades happen?
 ```
 
+For long recordings, `tools/record_loop.sh` runs `od_feedd` and records hourly
+chunks to `~/rec/btc_YYYY-MM-DD_HHMM.odj` until `~/rec/STOP` exists (it finishes the
+current chunk first). It restarts the feed if it exits and stops below 3 GB of free
+disk; an hour is ~400 MB. The Python tools cache each journal's summary in
+`<journal>.stats.json`, keyed on its size and mtime. Parsing an hour takes ~18 s and
+~400 MB, rerunning from the cache ~1.6 s and ~20 MB, so re-scoring every session
+as new ones arrive stays cheap.
+
 `od_record` journals both bus topics (binary, append-only, starting from the full
 last-value-cache state). `od_replay` runs the engine over the journal with the
 recorded timestamps as its clock and synchronous surface refits, so a replay is
@@ -575,6 +583,7 @@ config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.
 | `tools/prior_eval.py` | Scores flow priors on journals they weren't built from |
 | `tools/prior_walk_forward.py` | Walk-forward test of flow priors over consecutive journals |
 | `tools/prior_strength.py` | Tunes how the engine weighs the flow prior against recent trades |
+| `tools/record_loop.sh` | Records hourly journal chunks until told to stop |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
 | `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |
