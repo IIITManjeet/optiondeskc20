@@ -283,6 +283,9 @@ The machine sleeping will stop a recording. While a laptop sleeps, Deribit drops
 WebSocket, but the client never hears about it, so the read used to block forever
 (the feed showed "connected" at 0 tickers/s for hours). The feed now drops any
 connection that has sent nothing for 3 heartbeat intervals (30 s) and reconnects.
+Deribit also closes long-lived connections every few hours; the reconnect backoff now
+starts again at 1 s after a session that ran for a while. It used to keep doubling,
+toward 30 s of lost data per close.
 
 `od_record` journals both bus topics (binary, append-only, starting from the full
 last-value-cache state). `od_replay` runs the engine over the journal with the
@@ -453,7 +456,7 @@ actually seen, with a small floor so options without history still get budget.
 
 ```bash
 python3 tools/journal_stats.py ~/btc.odj --profile data/flow/btc_2026-10-09.json
-# then in the config: "flow_prior": "../data/flow/btc_pooled_2026-10-17.json"
+# then in the config: "flow_prior": "../data/flow/btc_pooled_2026-10-18.json"
 ```
 
 The prior in `data/flow/` was built from the 18.7-minute Oct 9 recording, where
@@ -490,20 +493,21 @@ trades go better than "every option is equally likely".
 
 ```bash
 python3 tools/prior_walk_forward.py ~/btc_session.odj ~/btc_oct14.odj ~/rec/btc_*.odj     --shrink 0 300 1000 3000 --shape
-python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-17.json --shrink 1000
+python3 tools/journal_stats.py <journals...> --profile data/flow/btc_pooled_2026-10-18.json --shrink 1000
 ```
 
-Eight sessions: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), two consecutive
-chunks early on Oct 17 (60 and 31 min), and three recorded unattended on the evening of
-Oct 17 (60 min each). Each prior is built only from sessions before the one it's tested
-on, giving 1120 test trades:
+Eighteen sessions, 964 minutes: Oct 9 (19 min), Oct 14 (30 min), Oct 15 (60 min), two
+consecutive chunks early on Oct 17 (60 and 31 min), three hours on the evening of Oct
+17, and ten hours on Oct 18 (03:50 to 13:40), all but the first five recorded
+unattended. Each prior is built only from sessions before the one it's tested on,
+giving 1923 test trades:
 
 | prior (trade-weighted bits/trade vs flat) | raw | shrink 300 | shrink 1000 | shrink 3000 |
 |---|---|---|---|---|
-| last session | −0.38 | +0.28 | +0.37 | +0.26 |
-| all earlier sessions pooled | −0.04 | +0.33 | **+0.44** | +0.42 |
-| last session, shape only | −0.07 | +0.56 | +0.65 | +0.55 |
-| pooled, shape only | +0.33 | +0.67 | **+0.76** | +0.74 |
+| last session | −0.02 | +0.47 | **+0.54** | +0.41 |
+| all earlier sessions pooled | +0.18 | +0.41 | +0.48 | +0.50 |
+| last session, shape only | +0.19 | +0.67 | +0.75 | +0.62 |
+| pooled, shape only | +0.56 | +0.77 | **+0.82** | +0.81 |
 
 Two things go wrong with a raw prior. It is **overconfident**: a bucket that didn't
 trade in a short session gets a rate near zero, and when it then trades the miss is
@@ -511,24 +515,28 @@ expensive. And the **level moves**: Oct 9 traded 0.0071 times a minute per optio
 Oct 14 0.0024. `--shrink N` fixes the first by adding N option-minutes at the average
 rate to every bucket; `--shape` sets aside the second by rescaling each prior to the
 test session's total. Shape is what matters to the allocator, which only ranks options
-against each other. Pooled over all earlier sessions and shrunk by ~1000
-option-minutes, the prior is the best on both measures.
+against each other. Shrinking by ~1000 option-minutes is best throughout.
 
 Per session, the test gets easier as history grows. With three sessions, the most
 recent session alone beat the pool (Oct 9's daily-heavy flow diluted the Oct 15
-prediction). From four on, pooling wins: +0.90 bits/trade on the Oct 17 hour (shape
-only). Consecutive hours are very alike: the hour before predicted the next
-half-hour at +1.97 bits/trade with no shrinkage at all. That argues for a recent-flow
-term on top of a pooled prior, which is what the engine's blend of prior and observed
-trades already is (`prior_strength_min`). On the evening of Oct 17 the flow moved
-again: first to 30OCT26 and 20OCT26, with strikes 15–20% from the forward, then to
-6NOV26 (25 of 107 and 22 of 73 trades in the last two hours). In those last two hours
-the previous hour alone beat the pool (+0.46 and +0.85 vs +0.12 and −0.51, shrunk by
-1000). So I tried weighting sessions by age, with a half-life of 0.5 to 48 hours.
-Equal weights still scored best, on shape (+0.78 vs +0.31 to +0.74) and combined with
-the engine's blend (+1.41 vs +1.18 to +1.37). Discounting old sessions throws away too
-many trades, and the engine's blend with live trades already handles recency.
-`data/flow/btc_pooled_2026-10-17.json` is all eight sessions pooled (382 min, 1262
+prediction); from four on, pooling won. Consecutive hours are alike: the previous hour
+alone, shrunk, beat flat in every one of the ten Oct 18 hours. On level, it now edges
+out the pool (+0.54 vs +0.48), while the pool still ranks options better (+0.82 vs
++0.75). The flow moves: on the evening of Oct 17 from the dailies to 30OCT26 and
+20OCT26, then to 6NOV26. In the 23:29 hour the pool scored −0.51 while the previous
+hour alone scored +0.85.
+
+Within the engine's blend, which is the score that matters, I tried weighting sessions
+by age (half-life 0.5 to 48 hours):
+
+| blend (m = 10), shrink 1000 | half-life 0.5 h | 1 h | 3 h | 12 h | 48 h | equal |
+|---|---|---|---|---|---|---|
+| bits/trade vs flat | +1.13 | +1.18 | +1.24 | +1.34 | +1.34 | +1.33 |
+
+Short half-lives are clearly worse: they throw away too many trades, and the blend with
+live trades already handles recency. A 12–48 hour half-life gains 0.01–0.02 bits/trade
+over equal weights, too little to be worth the extra parameter, so pooling stays equal.
+`data/flow/btc_pooled_2026-10-18.json` is all eighteen sessions pooled (964 min, 2070
 trades), shrunk by 1000.
 
 Replaying the Oct 15 hour at 2 requests/s with a prior from Oct 9 + 14 only (shrunk by
@@ -554,11 +562,11 @@ sessions, and scores it on the next minute's trades:
 
 | m (minutes) | 0 (now only) | 1 | 3 | **10** | 30 | 100 | 300 | prior only |
 |---|---|---|---|---|---|---|---|---|
-| bits/trade vs flat (1092 trades) | −0.95 | +0.58 | +1.14 | **+1.35** | +1.22 | +0.95 | +0.74 | +0.43 |
-| shape only | −0.93 | +0.60 | +1.18 | **+1.48** | +1.46 | +1.26 | +1.07 | +0.77 |
+| bits/trade vs flat (1887 trades) | −1.07 | +0.52 | +1.09 | **+1.30** | +1.16 | +0.92 | +0.73 | +0.48 |
+| shape only | −1.06 | +0.53 | +1.13 | **+1.42** | +1.40 | +1.22 | +1.06 | +0.82 |
 
-The default of 10 is the best setting. Every test session peaks at 10–30, and it is
-still best with the engine's 0.005 floor. Blending the two nearly triples the score of
+The default of 10 is the best setting. Over 17 test sessions, m = 3 won only four hours,
+by at most 0.05 bits/trade, and m = 30 two. Blending the two nearly triples the score of
 the prior alone. Recent trades alone are worse than flat, because one trade in a quiet
 option says little. The prior alone misses the drift within a session. The example
 config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.

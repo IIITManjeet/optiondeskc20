@@ -70,12 +70,16 @@ void Feed::interrupt() {
 void Feed::run(const std::atomic<bool>& stop) {
     int backoff_s = 1;
     while (!stop.load()) {
+        const auto started = std::chrono::steady_clock::now();
         try {
             session(stop);
             backoff_s = 1;
         } catch (const std::exception& e) {
             counters_.connected = false;
             if (stop.load()) break;
+            // The server closes long-lived connections now and then: after a session that
+            // ran for a while, start the backoff over instead of doubling the last one.
+            if (std::chrono::steady_clock::now() - started > std::chrono::minutes(1)) backoff_s = 1;
             counters_.reconnects.fetch_add(1, std::memory_order_relaxed);
             std::fprintf(stderr, "feed: %s; reconnecting in %ds\n", e.what(), backoff_s);
             for (int i = 0; i < backoff_s * 10 && !stop.load(); ++i)
