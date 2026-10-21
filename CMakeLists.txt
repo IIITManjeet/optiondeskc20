@@ -81,6 +81,9 @@ target_link_libraries(od_replay PRIVATE od_feed)
 add_executable(od_risk apps/od_risk.cpp)
 target_link_libraries(od_risk PRIVATE od_feed)
 
+add_executable(od_web apps/od_web.cpp)
+target_link_libraries(od_web PRIVATE od_feed)
+
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_feed)
 target_compile_definitions(od_bench PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
