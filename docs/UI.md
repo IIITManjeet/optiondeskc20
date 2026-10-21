@@ -217,10 +217,13 @@ means it could not be solved. The market maker messages (`type: "mm"`, `"order"`
 
 ## Phases
 
-1. **Live Desk**:
+1. **Live Desk** ✅:
    - `od_web` ✅
-   - UI scaffold, sidebar, WebSocket store, Desk panels
-   - fixture and mock mode
+   - UI scaffold, sidebar, WebSocket store, Desk panels ✅
+   - fixture and mock mode ✅
+
+   Tested end to end against the live BTC feed: a snapshot every second, at
+   most 1.05 s apart.
 2. **Public demo**:
    - shared `web_snapshot.cpp`
    - `od_snapshots` exporter and replay player

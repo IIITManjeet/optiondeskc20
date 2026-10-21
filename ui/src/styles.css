@@ -1,0 +1,442 @@
+/* Pro trading terminal: dark, dense, monospace tabular numbers.
+   Green = bid/buy, red = ask/sell, everywhere. */
+
+:root {
+  --bg: #0b0e12;
+  --panel: #11161c;
+  --panel-head: #151b22;
+  --line: #222b35;
+  --grid: #2a3440;
+  --text: #d6dde6;
+  --muted: #7d8996;
+  --accent: #50c8a0;
+  --bid: #3ecf7a;
+  --ask: #f0596b;
+  --warn: #e8b84a;
+  --sel: #1b2a36;
+  --itm: #131c24;
+  --mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.35 var(--sans);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.muted {
+  color: var(--muted);
+}
+.accent {
+  color: var(--accent);
+}
+.bid {
+  color: var(--bid);
+}
+.ask {
+  color: var(--ask);
+}
+.warn {
+  color: var(--warn);
+}
+
+/* --- shell ---------------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0;
+}
+.brand {
+  font-family: var(--mono);
+  padding: 4px 14px 14px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.brand b {
+  color: var(--accent);
+  font-weight: 600;
+}
+.nav {
+  padding: 7px 14px;
+  color: var(--text);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+.nav:hover {
+  background: var(--panel-head);
+}
+.nav.on {
+  border-left-color: var(--accent);
+  background: var(--sel);
+}
+.nav.off {
+  color: #4a5561;
+  cursor: default;
+}
+
+.content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* --- desk ------------------------------------------------------------------ */
+
+.desk {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.headerbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.headerbar .ccy {
+  font: 600 16px var(--mono);
+  color: var(--accent);
+}
+.kv {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.kv label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kv b {
+  font-weight: 500;
+}
+.spacer {
+  flex: 1;
+}
+.hint {
+  color: var(--warn);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: 600 11px var(--mono);
+  letter-spacing: 0.05em;
+}
+.badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.state-live {
+  color: var(--bid);
+}
+.state-live .dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.state-stale,
+.state-waiting,
+.state-connecting {
+  color: var(--warn);
+}
+.state-disconnected {
+  color: var(--ask);
+}
+.badge.mock {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.desk-wait {
+  margin: 48px auto;
+  color: var(--muted);
+}
+
+.desk-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(330px, 0.66fr);
+  grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-areas:
+    "termtable smile   tape"
+    "chain     term    health";
+}
+.desk-grid > :nth-child(1) {
+  grid-area: termtable;
+}
+.desk-grid > .smile {
+  grid-area: smile;
+}
+.desk-grid > .chain {
+  grid-area: chain;
+}
+.desk-grid > .term {
+  grid-area: term;
+}
+.desk-grid > .tape {
+  grid-area: tape;
+}
+.desk-grid > .health {
+  grid-area: health;
+}
+
+@media (max-width: 1100px) {
+  .desk-grid {
+    overflow-y: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: 380px;
+    grid-template-areas: "termtable" "smile" "chain" "term" "tape" "health";
+  }
+}
+
+/* --- panels ---------------------------------------------------------------- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: opacity 0.2s;
+}
+.panel.dim {
+  opacity: 0.45;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--panel-head);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.panel-head h2 .accent,
+.panel-head h2 .muted {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.panel.smile .panel-body,
+.panel.term .panel-body,
+.panel.chain .panel-body,
+.panel.tape .panel-body {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.chart {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.empty {
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.seg button {
+  background: none;
+  border: 0;
+  padding: 1px 8px;
+  font: 11px var(--mono);
+  color: var(--muted);
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--sel);
+  color: var(--accent);
+}
+
+/* --- tables ---------------------------------------------------------------- */
+
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+table.grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-head);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.grid td {
+  padding: 2px 8px;
+  border-bottom: 1px solid #171e26;
+  white-space: nowrap;
+}
+table.grid .r {
+  text-align: right;
+}
+table.grid .c {
+  text-align: center;
+}
+table.clickable tbody tr {
+  cursor: pointer;
+}
+table.grid tbody tr:hover td {
+  background: #16202a;
+}
+table.grid tr.sel td {
+  background: var(--sel);
+}
+table.grid tr.sel td:first-child {
+  box-shadow: inset 2px 0 var(--accent);
+}
+.flag {
+  color: var(--ask);
+  font: 600 10px var(--mono);
+  border: 1px solid var(--ask);
+  border-radius: 2px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+
+.tape table.grid td,
+.tape table.grid th,
+.chain-table td,
+.chain-table th {
+  padding-left: 5px;
+  padding-right: 5px;
+}
+.chain-table td.itm {
+  background: var(--itm);
+}
+.chain-table td.strike,
+.chain-table th.strike {
+  text-align: center;
+  font-weight: 600;
+  background: var(--panel-head);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.chain-table tr.atm td {
+  border-top: 1px solid var(--accent);
+}
+.chain-table tr.atm td.strike {
+  color: var(--accent);
+}
+
+/* --- feed health ----------------------------------------------------------- */
+
+.spark {
+  padding: 6px 10px 2px;
+}
+.spark-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.spark svg {
+  width: 100%;
+  height: 32px;
+  display: block;
+}
+.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.stats {
+  margin: 6px 0 0;
+  padding: 0 10px 8px;
+}
+.stats > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid #171e26;
+  font-size: 12px;
+}
+.stats dt {
+  color: var(--muted);
+}
+.stats dd {
+  margin: 0;
+}

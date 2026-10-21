@@ -571,6 +571,29 @@ the prior alone. Recent trades alone are worse than flat, because one trade in a
 option says little. The prior alone misses the drift within a session. The example
 config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.
 
+## Web UI
+
+The live desk in a browser (plan and requirements in `docs/UI.md`). `od_web` reads
+the feed buses, refits the surface once a second and pushes a JSON snapshot to
+every WebSocket client. The React app in `ui/` shows:
+- the term structure, with arbitrage flags;
+- the smile (bid–ask IVs, mid, mark and the SVI fit);
+- the ATM, RR25 and BF25 term chart;
+- the option chain;
+- the trade tape;
+- feed health.
+
+```sh
+./build/od_feedd --currency BTC                       # WSL, terminal 1
+./build/od_web --static ui/dist                       # WSL, terminal 2: http://localhost:8090
+cd ui && npm install && npm run build                 # once, to produce ui/dist
+npm run dev                                           # or: dev server on :5173, proxies /ws to :8090
+npm run mock                                          # no feed needed: replays a saved snapshot
+```
+
+`od_web` can start before `od_feedd` and reattaches when it restarts. It binds
+127.0.0.1 by default. A snapshot is about 400 KB; localhost handles that easily.
+
 ## What's in here
 
 | File | What it does |
@@ -606,6 +629,8 @@ config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.
 | `tools/prior_walk_forward.py` | Walk-forward test of flow priors over consecutive journals |
 | `tools/prior_strength.py` | Tunes how the engine weighs the flow prior against recent trades |
 | `tools/record_loop.sh` | Records hourly journal chunks until told to stop |
+| `apps/od_web.cpp` | Snapshot server for the web UI: buses → surface fit → WebSocket JSON, static files |
+| `ui/` | React + TypeScript web UI (Desk page; later the demo, market maker and research pages) |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
 | `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |

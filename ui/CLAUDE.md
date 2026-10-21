@@ -65,5 +65,5 @@ working in this folder.
   - `~/build/optionsdesk/od_web`
 - Windows, in `ui/`:
   - `npm run dev` serves on http://localhost:5173 and proxies `/ws` and `/api` to :8090;
-  - `npm run dev -- --mode mock` uses the saved fixture instead of a live feed.
+  - `npm run mock` uses the saved fixture (`src/fixtures/snapshot.json`) instead of a live feed.
 - Before committing: `npm run typecheck && npm run test && npm run build`.
