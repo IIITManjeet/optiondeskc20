@@ -187,6 +187,37 @@ button {
   color: var(--warn);
   border-color: var(--warn);
 }
+.state-replay,
+.badge.replay {
+  color: var(--accent);
+}
+
+.replaybar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-head);
+}
+.replaybar select,
+.replaybar .play {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font: 12px var(--mono);
+  cursor: pointer;
+}
+.replaybar .play {
+  min-width: 34px;
+  color: var(--accent);
+}
+.replaybar .scrub {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
 @keyframes pulse {
   50% {
     opacity: 0.3;

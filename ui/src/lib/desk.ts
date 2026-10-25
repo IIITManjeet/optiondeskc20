@@ -5,7 +5,7 @@ import type { ChainRow, Expiry, LiveSnapshot, Snapshot } from "../types";
 /** How long without a snapshot before the data counts as stale (live mode). */
 export const STALE_AFTER_MS = 3000;
 
-export type FeedState = "connecting" | "waiting" | "live" | "stale" | "disconnected";
+export type FeedState = "connecting" | "waiting" | "live" | "stale" | "disconnected" | "replay";
 
 /**
  * One word for the header: is what's on screen live?
@@ -13,6 +13,7 @@ export type FeedState = "connecting" | "waiting" | "live" | "stale" | "disconnec
  *  waiting      od_web is up but no feed bus attached
  *  disconnected socket down, or the exchange connection is down
  *  stale        snapshots stopped, or od_feedd's heartbeat stopped
+ * (The demo shows "replay" instead: its data is recorded, never live.)
  */
 export function feedState(snap: Snapshot | null, socketOpen: boolean, ageMs: number): FeedState {
   if (!snap) return "connecting";

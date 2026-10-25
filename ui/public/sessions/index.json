@@ -1,0 +1,16 @@
+{
+ "format": 1,
+ "sessions": [
+  {
+   "bytes": 1215752,
+   "currency": "BTC",
+   "end_ms": 1792308648122,
+   "every_s": 5.0,
+   "format": 1,
+   "id": "btc-2026-10-18-1200",
+   "journal": "btc_2026-10-18_1200.odj",
+   "snapshots": 719,
+   "start_ms": 1792305058122
+  }
+ ]
+}

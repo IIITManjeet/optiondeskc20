@@ -26,11 +26,16 @@ working in this folder.
 - The UI computes nothing financial that the server already computes (fits, Greeks,
   IVs). Derived display values (%, USD conversions, sparkline history) live in
   `src/lib`, with Vitest tests.
+- The one exception is demo replay files, which leave out the Greeks and the smile
+  points and curve to fit GitHub Pages. `src/lib/demo.ts` rebuilds them with
+  `src/lib/black76.ts`, a port of the C++ pricer, and `demo.test.ts` checks the
+  result against a C++ snapshot. If you change the pricing or surface code in C++,
+  change the port too and regenerate the fixture (`od_snapshots --fixture`).
 - An IV of 0 or a missing `fit` means "no value". Show `–`, never 0%.
 
 ## Structure
 - `src/store/`: the one WebSocket connection (reconnect with backoff) and snapshot
-  store, read with `useSyncExternalStore`.
+  store, read with `useSyncExternalStore`; `replay.ts` feeds the same store in the demo.
 - `src/panels/`: one component per panel. Each handles its loading, empty and stale states.
 - `src/charts/`: ECharts wrappers. Update with `setOption`, don't remount every tick.
 - `src/lib/`: formatting and pure helpers.
@@ -65,5 +70,7 @@ working in this folder.
   - `~/build/optionsdesk/od_web`
 - Windows, in `ui/`:
   - `npm run dev` serves on http://localhost:5173 and proxies `/ws` and `/api` to :8090;
-  - `npm run mock` uses the saved fixture (`src/fixtures/snapshot.json`) instead of a live feed.
+  - `npm run mock` uses the saved fixture (`src/fixtures/snapshot.json`) instead of a live feed;
+  - `npm run demo` is the demo build's player over `public/sessions` (exported with
+    `od_snapshots`), and `npm run build:demo` writes it to `dist-demo/`.
 - Before committing: `npm run typecheck && npm run test && npm run build`.

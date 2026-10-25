@@ -591,6 +591,15 @@ npm run dev                                           # or: dev server on :5173,
 npm run mock                                          # no feed needed: replays a saved snapshot
 ```
 
+The public demo replays recorded sessions instead, from static files. `od_snapshots`
+exports a journal at a snapshot every 5 s, about 1.2 MB per hour. The browser
+recomputes the Greeks and smile IVs that the files leave out.
+
+```sh
+./build/od_snapshots --journal /mnt/d/optionsdesk-rec/btc_2026-10-18_1200.odj --out ui/public/sessions
+cd ui && npm run demo                                 # player on :5173; npm run build:demo -> ui/dist-demo
+```
+
 `od_web` can start before `od_feedd` and reattaches when it restarts. It binds
 127.0.0.1 by default. A snapshot is about 400 KB; localhost handles that easily.
 
@@ -630,6 +639,8 @@ npm run mock                                          # no feed needed: replays 
 | `tools/prior_strength.py` | Tunes how the engine weighs the flow prior against recent trades |
 | `tools/record_loop.sh` | Records hourly journal chunks until told to stop |
 | `apps/od_web.cpp` | Snapshot server for the web UI: buses → surface fit → WebSocket JSON, static files |
+| `apps/od_snapshots.cpp` | Journal → compact, delta-encoded replay files for the demo UI |
+| `src/web_snapshot.cpp` | The web UI's snapshot JSON, shared by `od_web` and `od_snapshots` |
 | `ui/` | React + TypeScript web UI (Desk page; later the demo, market maker and research pages) |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |

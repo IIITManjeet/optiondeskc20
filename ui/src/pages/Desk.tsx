@@ -4,6 +4,7 @@ import { usePref } from "../lib/prefs";
 import { ChainTable } from "../panels/ChainTable";
 import { FeedHealth } from "../panels/FeedHealth";
 import { HeaderBar } from "../panels/HeaderBar";
+import { ReplayBar } from "../panels/ReplayBar";
 import { SmileChart, type SmileAxis } from "../panels/SmileChart";
 import { TermChart } from "../panels/TermChart";
 import { TermTable } from "../panels/TermTable";
@@ -22,11 +23,12 @@ function useNow(ms: number) {
 }
 
 export function Desk() {
-  const { snap, receivedAt, socketOpen, history, mock } = useDesk();
+  const { snap, receivedAt, socketOpen, history, mock, replay } = useDesk();
   const now = useNow(500);
   const ageMs = receivedAt ? Math.max(0, now - receivedAt) : 0;
-  const state = feedState(snap, socketOpen, ageMs);
-  const dim = state !== "live";
+  // A replay is never stale: pausing it is not the feed stopping.
+  const state = replay ? "replay" : feedState(snap, socketOpen, ageMs);
+  const dim = state !== "live" && state !== "replay";
 
   const [wanted, setWanted] = usePref("desk.expiry", null);
   const [axis, setAxis] = usePref<SmileAxis>("desk.axis", "strike");
@@ -38,9 +40,12 @@ export function Desk() {
   return (
     <div className="desk">
       <HeaderBar snap={snap} state={state} ageMs={ageMs} mock={mock} />
+      {replay && <ReplayBar replay={replay} />}
       {!live ? (
         <div className="desk-wait">
-          {state === "connecting" || state === "disconnected"
+          {replay
+            ? (replay.error ?? "Loading a recorded session…")
+            : state === "connecting" || state === "disconnected"
             ? "Connecting to od_web… (WSL: ~/build/optionsdesk/od_web)"
             : "od_web is running but no feed is attached. Start od_feedd --currency BTC."}
         </div>

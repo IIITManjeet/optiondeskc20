@@ -1,9 +1,23 @@
-// The one data connection: a WebSocket to od_web (live), or a saved fixture
-// replayed every second (mock mode). Components read it with useDesk().
+// The one data connection: a WebSocket to od_web (live), a saved fixture replayed
+// every second (mock mode), or recorded sessions (demo mode, see replay.ts).
+// Components read it with useDesk().
 
 import { useSyncExternalStore } from "react";
 import { pushHistory } from "../lib/desk";
+import type { Session, SessionInfo } from "../lib/demo";
 import type { Snapshot } from "../types";
+
+/** The demo's replay player. */
+export interface ReplayState {
+  sessions: SessionInfo[];
+  session: Session | null;
+  pos: number; // snapshot index within the session
+  total: number;
+  playing: boolean;
+  speed: number; // 1 = recorded pace
+  loading: boolean;
+  error: string | null;
+}
 
 export interface HistoryPoint {
   t: number; // client receive time, ms
@@ -17,19 +31,24 @@ export interface DeskState {
   socketOpen: boolean;
   history: HistoryPoint[]; // newest last, one per snapshot
   mock: boolean;
+  replay: ReplayState | null; // demo mode only
 }
 
 const HISTORY = 180;
 
-let state: DeskState = { snap: null, receivedAt: 0, socketOpen: false, history: [], mock: false };
+let state: DeskState = { snap: null, receivedAt: 0, socketOpen: false, history: [], mock: false, replay: null };
 const listeners = new Set<() => void>();
 
-function set(patch: Partial<DeskState>) {
+export function getState(): DeskState {
+  return state;
+}
+
+export function set(patch: Partial<DeskState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
 }
 
-function receive(snap: Snapshot) {
+export function receive(snap: Snapshot) {
   const now = Date.now();
   const history =
     snap.feed !== null
@@ -54,6 +73,7 @@ export function startDesk() {
   if (started) return;
   started = true;
   if (import.meta.env.MODE === "mock") startMock();
+  else if (import.meta.env.MODE === "demo") void import("./replay").then((m) => m.startReplay());
   else startLive();
 }
 

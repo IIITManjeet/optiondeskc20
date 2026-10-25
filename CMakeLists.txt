@@ -28,6 +28,7 @@ FetchContent_MakeAvailable(simdjson)
 find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(Boost 1.74 REQUIRED CONFIG COMPONENTS headers)
 
 add_library(od_core
@@ -83,6 +84,9 @@ target_link_libraries(od_risk PRIVATE od_feed)
 
 add_executable(od_web apps/od_web.cpp)
 target_link_libraries(od_web PRIVATE od_feed)
+
+add_executable(od_snapshots apps/od_snapshots.cpp)
+target_link_libraries(od_snapshots PRIVATE od_feed ZLIB::ZLIB)
 
 add_executable(od_bench bench/od_bench.cpp)
 target_link_libraries(od_bench PRIVATE od_feed)

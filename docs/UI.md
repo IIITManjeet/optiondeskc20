@@ -48,7 +48,7 @@ journals ──od_snapshots (export)──> ui/public/sessions/*  ──GitHub A
 |---|---|---|
 | `od_web` | ✅ live snapshots | Attaches to the buses, refits the surface, pushes snapshots, serves `ui/dist`. Will grow: several currencies, the market maker proxy, the replay runner, SQLite, alerts |
 | `src/web_snapshot.cpp` | ✅ | `od::web::snapshot_json()`, moved out of `od_web` so the exporter uses exactly the same format |
-| `od_snapshots` | to do | Journal → compact demo files: a snapshot every N seconds, numbers rounded, gzipped NDJSON chunks plus `index.json` per session. Sized for GitHub Pages limits: 1 GB site, 100 MB per file, aiming for a few MB per session |
+| `od_snapshots` | ✅ | Journal → compact demo files (see *Demo files* below): about 1.2 MB per recorded hour at a snapshot every 5 s. GitHub Pages limits: 1 GB site, 100 MB per file |
 | `od_mm` status and commands | to do | A status bus with quotes, positions, P&L, Greeks, fills, budget and rejects. A command socket for kill, set parameters, manual place/cancel/amend, flatten and hedge. Manual orders go through `od_mm`'s risk gate, never around it |
 
 ## Pages
@@ -140,8 +140,8 @@ Only `od_web` writes the database. Back it up by copying the file.
 
 ## Data contract (snapshot, `type: "snapshot"`)
 
-Defined by `od::web::snapshot_json()` (`include/od/web_snapshot.hpp`) and mirrored by `ui/src/types.ts`. Demo files use
-the same shape, rounded.
+Defined by `od::web::snapshot_json()` (`include/od/web_snapshot.hpp`) and mirrored by `ui/src/types.ts`. Demo files
+store a compact form of it that the browser expands back to this shape (see *Demo files*).
 
 ```
 server_ms, currency, asof_ms, index, fit_ms
@@ -167,6 +167,30 @@ Units on the wire:
 `fit` is missing for expiries under 2 hours or without enough quotes. An IV of 0
 means it could not be solved. The market maker messages (`type: "mm"`, `"order"`,
 `"alert"`) will be added here as they are built.
+
+## Demo files
+
+Written by `od_snapshots` into `ui/public/sessions/`, read by `ui/src/store/replay.ts`:
+
+```
+sessions/index.json          {format, sessions: [{format, id, currency, journal, start_ms, end_ms, every_s, snapshots, bytes}]}, newest first
+sessions/<id>/index.json     the same, plus chunks: [{file, from_ms, to_ms, snapshots, bytes}]
+sessions/<id>/NNN.ndjson.gz  10 min of recorded time per file: a compact keyframe, then {"type": "patch", "patch": ...} lines
+```
+
+The compact form is the live snapshot minus what the browser can recompute
+exactly. `ui/src/lib/demo.ts` rebuilds it, and its tests check the result against
+a C++ snapshot (`ui/src/fixtures/demo_pair.json`, from `od_snapshots --fixture`):
+- the Greeks of every quote (Black-76 on the mark IV);
+- each fitted expiry's `curve` (from the SVI parameters) and `points` (bid/ask IVs
+  solved from the prices, with the same `in_fit` rule as `od::build_surface`).
+
+Numbers are rounded to 6 significant digits, forwards to 10. A patch node is a
+scalar (replace), `{"=": v}` (replace with an object or array), `{"o": {...}, "d": [...]}`
+(patch or delete object keys) or `{"a": {"i": node}}` (patch elements of an array
+whose length didn't change). Dropping the derived fields cut an hour from 37 MB to
+1.2 MB; delta encoding alone only reached 8–23 MB. `format` is bumped whenever any
+of this changes, and the player ignores sessions in other formats.
 
 ## Frontend requirements
 
@@ -226,7 +250,7 @@ means it could not be solved. The market maker messages (`type: "mm"`, `"order"`
    most 1.05 s apart.
 2. **Public demo**:
    - shared `web_snapshot.cpp` ✅
-   - `od_snapshots` exporter and replay player
+   - `od_snapshots` exporter and replay player ✅
    - About page and Pricer
    - Research views (read-only, from exported JSON)
    - GitHub Actions deploy to Pages

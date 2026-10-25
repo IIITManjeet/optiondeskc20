@@ -8,6 +8,7 @@ const LABEL: Record<FeedState, string> = {
   live: "LIVE",
   stale: "STALE",
   disconnected: "DISCONNECTED",
+  replay: "REPLAY",
 };
 
 export function HeaderBar({
@@ -36,10 +37,12 @@ export function HeaderBar({
       <span className="spacer" />
       {mock && <span className="badge mock">MOCK DATA</span>}
       {snap && snap.feed === null && <span className="hint">od_web is up; start od_feedd ({snap.waiting_for})</span>}
-      <span className="kv">
-        <label>data age</label>
-        <b className="num">{snap ? age(ageMs) : "–"}</b>
-      </span>
+      {state !== "replay" && (
+        <span className="kv">
+          <label>data age</label>
+          <b className="num">{snap ? age(ageMs) : "–"}</b>
+        </span>
+      )}
       <span className={`badge state-${state}`}>
         <i className="dot" />
         {LABEL[state]}

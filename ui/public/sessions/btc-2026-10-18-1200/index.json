@@ -1,0 +1,55 @@
+{
+ "bytes": 1215752,
+ "chunks": [
+  {
+   "bytes": 220517,
+   "file": "000.ndjson.gz",
+   "from_ms": 1792305058122,
+   "snapshots": 120,
+   "to_ms": 1792305653122
+  },
+  {
+   "bytes": 198252,
+   "file": "001.ndjson.gz",
+   "from_ms": 1792305658122,
+   "snapshots": 120,
+   "to_ms": 1792306253122
+  },
+  {
+   "bytes": 169934,
+   "file": "002.ndjson.gz",
+   "from_ms": 1792306258122,
+   "snapshots": 120,
+   "to_ms": 1792306853122
+  },
+  {
+   "bytes": 191284,
+   "file": "003.ndjson.gz",
+   "from_ms": 1792306858122,
+   "snapshots": 120,
+   "to_ms": 1792307453122
+  },
+  {
+   "bytes": 200792,
+   "file": "004.ndjson.gz",
+   "from_ms": 1792307458122,
+   "snapshots": 120,
+   "to_ms": 1792308053122
+  },
+  {
+   "bytes": 234973,
+   "file": "005.ndjson.gz",
+   "from_ms": 1792308058122,
+   "snapshots": 119,
+   "to_ms": 1792308648122
+  }
+ ],
+ "currency": "BTC",
+ "end_ms": 1792308648122,
+ "every_s": 5.0,
+ "format": 1,
+ "id": "btc-2026-10-18-1200",
+ "journal": "btc_2026-10-18_1200.odj",
+ "snapshots": 719,
+ "start_ms": 1792305058122
+}
