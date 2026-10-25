@@ -53,7 +53,7 @@ target_link_libraries(od_deribit PUBLIC od_core nlohmann_json::nlohmann_json CUR
 
 # Streaming feed: Boost.Beast WebSocket over OpenSSL.
 add_library(od_feed src/deribit_feed.cpp src/ticker_parser.cpp src/feed_bus.cpp src/journal.cpp
-  src/mm_engine.cpp src/deribit_gateway.cpp)
+  src/mm_engine.cpp src/deribit_gateway.cpp src/web_snapshot.cpp)
 target_link_libraries(od_feed PUBLIC od_deribit Boost::headers OpenSSL::SSL OpenSSL::Crypto Threads::Threads
   PRIVATE simdjson::simdjson)
 
@@ -107,7 +107,8 @@ if(OD_TESTS)
     tests/test_mm.cpp
     tests/test_journal.cpp
     tests/test_mm_engine.cpp
-    tests/test_deribit_orders.cpp)
+    tests/test_deribit_orders.cpp
+    tests/test_web_snapshot.cpp)
   target_link_libraries(od_tests PRIVATE od_feed GTest::gtest_main)
   target_compile_definitions(od_tests PRIVATE OD_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   include(GoogleTest)

@@ -14,7 +14,7 @@ working in this folder.
   trading terminal: dark and dense.
 
 ## Data
-- The snapshot contract is owned by `snapshot_json()` in `apps/od_web.cpp`.
+- The snapshot contract is owned by `od::web::snapshot_json()` in `src/web_snapshot.cpp`.
   `src/types.ts` mirrors it. Change both in the same commit and update the
   contract section in `docs/UI.md`.
 - Wire units:

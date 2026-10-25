@@ -1,4 +1,4 @@
-// Mirror of snapshot_json() in apps/od_web.cpp. Change both together (see docs/UI.md).
+// Mirror of od::web::snapshot_json() in src/web_snapshot.cpp. Change both together (see docs/UI.md).
 // Units: IVs decimal, prices in the coin, vega USD per vol point, gamma per 1% move,
 // theta USD per day, times epoch ms UTC.
 

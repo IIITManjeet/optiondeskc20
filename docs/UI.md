@@ -47,7 +47,7 @@ journals ──od_snapshots (export)──> ui/public/sessions/*  ──GitHub A
 | Piece | Status | Role |
 |---|---|---|
 | `od_web` | ✅ live snapshots | Attaches to the buses, refits the surface, pushes snapshots, serves `ui/dist`. Will grow: several currencies, the market maker proxy, the replay runner, SQLite, alerts |
-| `src/web_snapshot.cpp` | to do | `snapshot_json()` moved out of `od_web`, so the exporter uses exactly the same format |
+| `src/web_snapshot.cpp` | ✅ | `od::web::snapshot_json()`, moved out of `od_web` so the exporter uses exactly the same format |
 | `od_snapshots` | to do | Journal → compact demo files: a snapshot every N seconds, numbers rounded, gzipped NDJSON chunks plus `index.json` per session. Sized for GitHub Pages limits: 1 GB site, 100 MB per file, aiming for a few MB per session |
 | `od_mm` status and commands | to do | A status bus with quotes, positions, P&L, Greeks, fills, budget and rejects. A command socket for kill, set parameters, manual place/cancel/amend, flatten and hedge. Manual orders go through `od_mm`'s risk gate, never around it |
 
@@ -140,7 +140,7 @@ Only `od_web` writes the database. Back it up by copying the file.
 
 ## Data contract (snapshot, `type: "snapshot"`)
 
-Defined by `snapshot_json()` and mirrored by `ui/src/types.ts`. Demo files use
+Defined by `od::web::snapshot_json()` (`include/od/web_snapshot.hpp`) and mirrored by `ui/src/types.ts`. Demo files use
 the same shape, rounded.
 
 ```
@@ -225,7 +225,7 @@ means it could not be solved. The market maker messages (`type: "mm"`, `"order"`
    Tested end to end against the live BTC feed: a snapshot every second, at
    most 1.05 s apart.
 2. **Public demo**:
-   - shared `web_snapshot.cpp`
+   - shared `web_snapshot.cpp` ✅
    - `od_snapshots` exporter and replay player
    - About page and Pricer
    - Research views (read-only, from exported JSON)
