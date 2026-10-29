@@ -21,8 +21,6 @@ Deribit's BTC/ETH options.
 - **M6, record and replay:** binary market-data journal, deterministic replay of the
   strategy engine over recorded data, config comparison.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
-
 ```
 Deribit REST ──> Snapshot ──> OptionChain ──> per-expiry IVs ──> SVI fit ──> smile metrics
  (libcurl)       (save/load     (grouped by     (bid/ask/mid,      (quasi-     ATM, RR25, BF25,
@@ -573,7 +571,7 @@ config (`examples/mm_btc.json`) now uses the pooled prior with m = 10.
 
 ## Web UI
 
-The live desk in a browser (plan and requirements in `docs/UI.md`). `od_web` reads
+The live desk in a browser. `od_web` reads
 the feed buses, refits the surface once a second and pushes a JSON snapshot to
 every WebSocket client. The React app in `ui/` shows:
 - the term structure, with arbitrage flags;
