@@ -593,7 +593,9 @@ npm run mock                                          # no feed needed: replays 
 
 The public demo replays recorded sessions instead, from static files. `od_snapshots`
 exports a journal at a snapshot every 5 s, about 1.2 MB per hour. The browser
-recomputes the Greeks and smile IVs that the files leave out.
+recomputes the Greeks and smile IVs that the files leave out. The demo opens on an
+About page (its latency and flow-prior figures are copied from this README) and has a
+Pricer: Black-76 and SVI in the browser, which can load an expiry's fit from the Desk.
 
 ```sh
 ./build/od_snapshots --journal /mnt/d/optionsdesk-rec/btc_2026-10-18_1200.odj --out ui/public/sessions
@@ -641,7 +643,7 @@ cd ui && npm run demo                                 # player on :5173; npm run
 | `apps/od_web.cpp` | Snapshot server for the web UI: buses → surface fit → WebSocket JSON, static files |
 | `apps/od_snapshots.cpp` | Journal → compact, delta-encoded replay files for the demo UI |
 | `src/web_snapshot.cpp` | The web UI's snapshot JSON, shared by `od_web` and `od_snapshots` |
-| `ui/` | React + TypeScript web UI (Desk page; later the demo, market maker and research pages) |
+| `ui/` | React + TypeScript web UI (Desk, Pricer and the demo's About page; later market maker and research pages) |
 | `src/deribit_orders.cpp` | Order-entry protocol: requests out, execution reports in (no I/O) |
 | `src/deribit_gateway.cpp` | Testnet gateway thread: TLS WebSocket, rings, rate-limit pacing |
 | `apps/od_gw_smoke.cpp` | End-to-end gateway check against testnet |

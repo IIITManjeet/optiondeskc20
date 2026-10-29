@@ -31,6 +31,8 @@ working in this folder.
   `src/lib/black76.ts`, a port of the C++ pricer, and `demo.test.ts` checks the
   result against a C++ snapshot. If you change the pricing or surface code in C++,
   change the port too and regenerate the fixture (`od_snapshots --fixture`).
+  The Pricer page (`src/lib/pricer.ts`) also prices with the port, but only the
+  user's own inputs; `pricer.test.ts` checks it against the C++ test cases.
 - An IV of 0 or a missing `fit` means "no value". Show `–`, never 0%.
 
 ## Structure
@@ -39,7 +41,8 @@ working in this folder.
 - `src/panels/`: one component per panel. Each handles its loading, empty and stale states.
 - `src/charts/`: ECharts wrappers. Update with `setOption`, don't remount every tick.
 - `src/lib/`: formatting and pure helpers.
-- `src/pages/`: Desk `/`, later `/mm`, `/research`, `/system`.
+- `src/pages/`: Desk `/` (`/desk` in the demo, where About is `/`), Pricer `/pricer`,
+  later `/mm`, `/research`, `/system`.
 
 ## Conventions
 - TypeScript strict. No `any` on snapshot data.

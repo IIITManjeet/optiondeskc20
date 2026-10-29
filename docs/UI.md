@@ -251,7 +251,7 @@ of this changes, and the player ignores sessions in other formats.
 2. **Public demo**:
    - shared `web_snapshot.cpp` ✅
    - `od_snapshots` exporter and replay player ✅
-   - About page and Pricer
+   - About page and Pricer ✅
    - Research views (read-only, from exported JSON)
    - GitHub Actions deploy to Pages
 3. **Market maker console**:

@@ -144,3 +144,54 @@ export function sviIv(p: Svi, k: number, T: number): number {
   const w = sviW(p, k);
   return w > 0 ? Math.sqrt(w / T) : 0;
 }
+
+/** dw/dk. */
+export function sviW1(p: Svi, k: number): number {
+  const x = k - p.m;
+  return p.b * (p.rho + x / Math.sqrt(x * x + p.s * p.s));
+}
+
+/** d²w/dk². */
+export function sviW2(p: Svi, k: number): number {
+  const x = k - p.m;
+  const r2 = x * x + p.s * p.s;
+  return (p.b * p.s * p.s) / (r2 * Math.sqrt(r2));
+}
+
+/**
+ * Durrleman's g(k): the implied density is non-negative at k iff g(k) >= 0, so
+ * g < 0 anywhere means butterfly arbitrage. od::SviParams::g.
+ */
+export function sviG(p: Svi, k: number): number {
+  const w = sviW(p, k);
+  const d1 = sviW1(p, k);
+  const d2 = sviW2(p, k);
+  const t = 1 - (k * d1) / (2 * w);
+  return t * t - 0.25 * d1 * d1 * (1 / w + 0.25) + 0.5 * d2;
+}
+
+/** The basic parameter constraints the fitter enforces (od::SviParams::is_valid). */
+export function sviValid(p: Svi): boolean {
+  return (
+    p.b >= 0 &&
+    Math.abs(p.rho) < 1 &&
+    p.s > 0 &&
+    p.a + p.b * p.s * Math.sqrt(1 - p.rho * p.rho) >= 0 &&
+    p.b * (1 + Math.abs(p.rho)) <= 2
+  );
+}
+
+/** Minimum of g(k) over a grid on [kLo, kHi] (od::min_durrleman_g). */
+export function minDurrlemanG(p: Svi, kLo = -1.5, kHi = 1.5, n = 301): number {
+  let best = Infinity;
+  for (let i = 0; i < n; ++i) best = Math.min(best, sviG(p, kLo + ((kHi - kLo) * i) / (n - 1)));
+  return best;
+}
+
+/**
+ * Premium-adjusted delta for coin-settled options: the hedge ratio when P&L is
+ * measured in the coin (od::inverse_delta).
+ */
+export function inverseDelta(deltaUsd: number, priceUsd: number, F: number): number {
+  return deltaUsd - priceUsd / F;
+}
