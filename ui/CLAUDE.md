@@ -5,7 +5,7 @@ working in this folder.
 
 ## Two builds
 - `console` (localhost via `od_web`) has every page and control.
-- `demo` (GitHub Pages, static replay files) has About, Desk with the replay
+- `demo` (Vercel, static replay files) has About, Desk with the replay
   player, Pricer, and read-only Research.
 - Control code (market maker commands, orders, configs, system) lives under
   `src/console/`. It is imported only behind `import.meta.env.MODE === "console"`
@@ -27,7 +27,7 @@ working in this folder.
   IVs). Derived display values (%, USD conversions, sparkline history) live in
   `src/lib`, with Vitest tests.
 - The one exception is demo replay files, which leave out the Greeks and the smile
-  points and curve to fit GitHub Pages. `src/lib/demo.ts` rebuilds them with
+  points and curve to keep the static site small. `src/lib/demo.ts` rebuilds them with
   `src/lib/black76.ts`, a port of the C++ pricer, and `demo.test.ts` checks the
   result against a C++ snapshot. If you change the pricing or surface code in C++,
   change the port too and regenerate the fixture (`od_snapshots --fixture`).

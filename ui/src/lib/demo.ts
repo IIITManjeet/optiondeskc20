@@ -2,7 +2,7 @@
 //
 // A session is <id>/index.json plus gzipped NDJSON chunks. Each chunk starts with a
 // compact keyframe, then holds patches against the previous snapshot. "Compact"
-// means the fields below were dropped to fit GitHub Pages; expand() rebuilds them
+// means the fields below were dropped to keep the static site small; expand() rebuilds them
 // exactly as od::web::snapshot_json() and od::build_surface() compute them:
 //   - every quote's delta, gamma, vega, theta (Black-76 on the mark IV);
 //   - each fitted expiry's `curve` (the SVI smile) and `points` (bid/ask IVs per quote).
@@ -134,7 +134,7 @@ export function expand(s: CompactSnapshot): LiveSnapshot {
   return { ...s, expiries: s.expiries.map((e) => expandExpiry(e, s.asof_ms)) };
 }
 
-/** Fetches a URL that holds gzip bytes (GitHub Pages serves .gz without Content-Encoding). */
+/** Fetches a URL that holds gzip bytes (static hosts serve .gz without Content-Encoding). */
 export async function fetchGzipText(url: string): Promise<string> {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${url}: HTTP ${res.status}`);

@@ -596,6 +596,8 @@ exports a journal at a snapshot every 5 s, about 1.2 MB per hour. The browser
 recomputes the Greeks and smile IVs that the files leave out. The demo opens on an
 About page (its latency and flow-prior figures are copied from this README) and has a
 Pricer: Black-76 and SVI in the browser, which can load an expiry's fit from the Desk.
+It deploys to Vercel as a static site: `ui/vercel.json` typechecks, tests and runs
+`build:demo`, and serves `dist-demo/` with every route falling back to `index.html`.
 
 ```sh
 ./build/od_snapshots --journal /mnt/d/optionsdesk-rec/btc_2026-10-18_1200.odj --out ui/public/sessions

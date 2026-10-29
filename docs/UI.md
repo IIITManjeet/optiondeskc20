@@ -9,7 +9,7 @@ the UI are in [`ui/CLAUDE.md`](../ui/CLAUDE.md).
 | Topic | Decision |
 |---|---|
 | Who and where | A **public portfolio demo** and a private **console** for the owner |
-| Hosting | Demo: **GitHub Pages**, static, free, deployed by GitHub Actions. Console: **localhost only**, served by `od_web` in WSL |
+| Hosting | Demo: **Vercel**, static, built from `ui/` on every push to `main` (`ui/vercel.json`). Console: **localhost only**, served by `od_web` in WSL |
 | Live vs demo data | Console: live from `od_feedd`. Demo: **replays of recorded sessions** (pre-rendered snapshot files), so it never looks dead and needs no server |
 | Access | Demo is read-only, with no controls compiled in. Console has full control and needs no login, because it binds 127.0.0.1 and is never exposed |
 | Market maker control | Everything: monitor, kill switch, start/stop with a config, **live parameter tuning**, **manual orders** |
@@ -34,7 +34,7 @@ Deribit ──WS──> od_feedd (per currency) ──shm──> od_web ──WS
                          od_mm <──status bus + command socket──>             │  ├─ SQLite desk.db
                                                                              │  └─ alerts → Telegram
                       └──────────────────────────────────────────────────────────────────┘
-journals ──od_snapshots (export)──> ui/public/sessions/*  ──GitHub Actions──> GitHub Pages demo
+journals ──od_snapshots (export)──> ui/public/sessions/*  ──Vercel build──> demo site
 ```
 
 **One UI, two builds**, selected by a Vite mode:
@@ -48,7 +48,7 @@ journals ──od_snapshots (export)──> ui/public/sessions/*  ──GitHub A
 |---|---|---|
 | `od_web` | ✅ live snapshots | Attaches to the buses, refits the surface, pushes snapshots, serves `ui/dist`. Will grow: several currencies, the market maker proxy, the replay runner, SQLite, alerts |
 | `src/web_snapshot.cpp` | ✅ | `od::web::snapshot_json()`, moved out of `od_web` so the exporter uses exactly the same format |
-| `od_snapshots` | ✅ | Journal → compact demo files (see *Demo files* below): about 1.2 MB per recorded hour at a snapshot every 5 s. GitHub Pages limits: 1 GB site, 100 MB per file |
+| `od_snapshots` | ✅ | Journal → compact demo files (see *Demo files* below): about 1.2 MB per recorded hour at a snapshot every 5 s. Kept small so the demo stays a cheap static site |
 | `od_mm` status and commands | to do | A status bus with quotes, positions, P&L, Greeks, fills, budget and rejects. A command socket for kill, set parameters, manual place/cancel/amend, flatten and hedge. Manual orders go through `od_mm`'s risk gate, never around it |
 
 ## Pages
@@ -253,7 +253,7 @@ of this changes, and the player ignores sessions in other formats.
    - `od_snapshots` exporter and replay player ✅
    - About page and Pricer ✅
    - Research views (read-only, from exported JSON)
-   - GitHub Actions deploy to Pages
+   - Vercel deploy: config ✅ (`ui/vercel.json`), project to be connected
 3. **Market maker console**:
    - `od_mm` status bus and command socket
    - Market maker page with kill switch and start/stop
